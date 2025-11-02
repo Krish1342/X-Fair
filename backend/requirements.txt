@@ -1,0 +1,55 @@
+# Core FastAPI and ASGI server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Core workflow framework - LangGraph only (no LangChain to avoid HuggingFace conflicts)
+langgraph>=0.2.0
+
+# Direct Groq API client (no langchain-groq wrapper)
+groq>=0.9.0
+
+# Environment and configuration
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# HTTP client for external API calls
+httpx>=0.25.0
+requests>=2.31.0
+
+# Data processing and validation
+pandas>=2.1.0
+numpy>=1.24.0
+pytz>=2023.3
+python-dateutil>=2.8.0
+
+# Financial data APIs
+yfinance>=0.2.0
+alpha-vantage>=2.3.0
+
+# Async support
+aiofiles>=23.2.0
+
+# Logging
+loguru>=0.7.0
+
+# Data visualization
+plotly>=5.17.0
+matplotlib>=3.7.0
+
+# File handling
+openpyxl>=3.1.0
+
+# Security and authentication
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Database (SQLite for development, PostgreSQL for production)
+sqlalchemy>=2.0.0
+alembic>=1.12.0
+
+# Development tools
+black>=23.0.0
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
