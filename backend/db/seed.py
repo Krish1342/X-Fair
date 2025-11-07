@@ -62,22 +62,20 @@ def seed_demo():
             if not db.query(RecurringTransaction).filter(RecurringTransaction.user_id==uid, RecurringTransaction.description==r.description).first():
                 db.add(r)
 
-        # Seed diverse recent transactions
-        txs = [
-            # Recent transactions (last 30 days)
-            Transaction(user_id=uid, description="Salary Deposit", amount=3500, date=today - timedelta(days=1), category="Income", merchant="Employer"),
-            Transaction(user_id=uid, description="Starbucks Coffee", amount=-5.75, date=today - timedelta(days=1), category="Food & Dining", merchant="Starbucks"),
-            Transaction(user_id=uid, description="Gas Station", amount=-45.20, date=today - timedelta(days=2), category="Transportation", merchant="Shell"),
-            Transaction(user_id=uid, description="Grocery Shopping", amount=-127.89, date=today - timedelta(days=3), category="Food & Dining", merchant="Walmart"),
-            Transaction(user_id=uid, description="Electric Bill", amount=-89.45, date=today - timedelta(days=5), category="Utilities", merchant="Power Company"),
-            Transaction(user_id=uid, description="Amazon Purchase", amount=-67.99, date=today - timedelta(days=7), category="Shopping", merchant="Amazon"),
-            Transaction(user_id=uid, description="Restaurant Dinner", amount=-78.50, date=today - timedelta(days=8), category="Food & Dining", merchant="Olive Garden"),
-            Transaction(user_id=uid, description="Car Insurance", amount=-125.00, date=today - timedelta(days=10), category="Transportation", merchant="State Farm"),
-            Transaction(user_id=uid, description="Movie Tickets", amount=-28.50, date=today - timedelta(days=12), category="Entertainment", merchant="AMC Theaters"),
-            Transaction(user_id=uid, description="Emergency Fund Transfer", amount=500, date=today - timedelta(days=15), category="Savings", merchant="Bank Transfer"),
-            Transaction(user_id=uid, description="Pharmacy", amount=-23.45, date=today - timedelta(days=18), category="Health & Fitness", merchant="CVS"),
-            Transaction(user_id=uid, description="Coffee Shop", amount=-4.25, date=today - timedelta(days=20), category="Food & Dining", merchant="Local Cafe"),
-        ]
+
+        # Seed realistic transactions for the last 3 months (salary + a few expenses per month)
+        txs = []
+        for month_offset in range(0, 3):
+            salary_date = today - timedelta(days=month_offset*30 + 2)
+            txs.append(Transaction(user_id=uid, description=f"Salary Deposit", amount=3500, date=salary_date, category="Income", merchant="Employer"))
+            txs.append(Transaction(user_id=uid, description=f"Grocery Shopping", amount=-120.00, date=salary_date + timedelta(days=2), category="Food & Dining", merchant="Walmart"))
+            txs.append(Transaction(user_id=uid, description=f"Electric Bill", amount=-85.00, date=salary_date + timedelta(days=5), category="Utilities", merchant="Power Company"))
+            txs.append(Transaction(user_id=uid, description=f"Restaurant", amount=-60.00, date=salary_date + timedelta(days=10), category="Food & Dining", merchant="Olive Garden"))
+            txs.append(Transaction(user_id=uid, description=f"Gas Station", amount=-50.00, date=salary_date + timedelta(days=15), category="Transportation", merchant="Shell"))
+        # Add a couple of small extras
+        txs.append(Transaction(user_id=uid, description="Coffee Shop", amount=-5.00, date=today - timedelta(days=3), category="Food & Dining", merchant="Starbucks"))
+        txs.append(Transaction(user_id=uid, description="Movie Night", amount=-20.00, date=today - timedelta(days=12), category="Entertainment", merchant="AMC Theaters"))
+        txs.append(Transaction(user_id=uid, description="Pharmacy", amount=-15.00, date=today - timedelta(days=18), category="Health & Fitness", merchant="CVS"))
         for t in txs:
             exists = db.query(Transaction).filter(Transaction.user_id==uid, Transaction.description==t.description, Transaction.date==t.date).first()
             if not exists:
@@ -103,7 +101,7 @@ def seed_demo():
             Budget(user_id=uid_demo, category="Transportation", budgeted=400, month="2025-10"),
             Budget(user_id=uid_demo, category="Entertainment", budgeted=200, month="2025-10"),
             Budget(user_id=uid_demo, category="Shopping", budgeted=300, month="2025-10"),
-            Budget(user_id=uid_demo, category="Food & Dining", budgeted=550, month="2025-09"),
+            Budget(user_id=uid_demo, category="Miscellaneous", budgeted=550, month="2025-09"),
         ]
         for b in budgets_demo:
             if not db.query(Budget).filter(Budget.user_id==uid_demo, Budget.month==b.month, Budget.category==b.category).first():
@@ -127,12 +125,19 @@ def seed_demo():
             if not db.query(RecurringTransaction).filter(RecurringTransaction.user_id==uid_demo, RecurringTransaction.description==r.description).first():
                 db.add(r)
 
-        # Seed a few recent transactions for demo user
-        txs_demo = [
-            Transaction(user_id=uid_demo, description="Coffee Shop", amount=-4.50, date=today - timedelta(days=1), category="Food & Dining"),
-            Transaction(user_id=uid_demo, description="Salary Deposit", amount=2500, date=today - timedelta(days=2), category="Income"),
-            Transaction(user_id=uid_demo, description="Gas Station", amount=-45.00, date=today - timedelta(days=3), category="Transportation"),
-        ]
+        # Seed realistic transactions for demo user for the last 3 months
+        txs_demo = []
+        for month_offset in range(0, 3):
+            salary_date = today - timedelta(days=month_offset*30 + 2)
+            txs_demo.append(Transaction(user_id=uid_demo, description=f"Salary Deposit", amount=2500, date=salary_date, category="Income"))
+            txs_demo.append(Transaction(user_id=uid_demo, description=f"Grocery Shopping", amount=-90.00, date=salary_date + timedelta(days=2), category="Food & Dining"))
+            txs_demo.append(Transaction(user_id=uid_demo, description=f"Electric Bill", amount=-70.00, date=salary_date + timedelta(days=5), category="Utilities"))
+            txs_demo.append(Transaction(user_id=uid_demo, description=f"Restaurant", amount=-40.00, date=salary_date + timedelta(days=10), category="Food & Dining"))
+            txs_demo.append(Transaction(user_id=uid_demo, description=f"Gas Station", amount=-35.00, date=salary_date + timedelta(days=15), category="Transportation"))
+        # Add a couple of small extras
+        txs_demo.append(Transaction(user_id=uid_demo, description="Coffee Shop", amount=-4.50, date=today - timedelta(days=3), category="Food & Dining"))
+        txs_demo.append(Transaction(user_id=uid_demo, description="Movie Night", amount=-12.00, date=today - timedelta(days=12), category="Entertainment"))
+        txs_demo.append(Transaction(user_id=uid_demo, description="Pharmacy", amount=-8.00, date=today - timedelta(days=18), category="Health & Fitness"))
         for t in txs_demo:
             exists = db.query(Transaction).filter(Transaction.user_id==uid_demo, Transaction.description==t.description, Transaction.date==t.date).first()
             if not exists:

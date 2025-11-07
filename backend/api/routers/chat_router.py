@@ -23,6 +23,7 @@ router = APIRouter()
 # Initialize Groq client
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
+
 # Define state for LangGraph
 class FinanceChatState(TypedDict):
     messages: List[Dict[str, str]]
@@ -31,15 +32,19 @@ class FinanceChatState(TypedDict):
     context: Dict[str, Any]
     response: str
 
+
 # Simple chat memory storage
 chat_memory: Dict[int, List[Dict]] = {}
 MAX_CHAT_HISTORY = 10
+
 
 class ChatRequest(BaseModel):
     # Keep emp_id for frontend compatibility; also accept user_id
     emp_id: str | None = None
     user_id: int | None = None
     message: str
+
+
 # --- Utility: simple category normalization and NLP-assisted action extraction ---
 
 CATEGORY_MAP = {
@@ -76,6 +81,7 @@ CATEGORY_MAP = {
     "health & fitness": "Health & Fitness",
 }
 
+
 def normalize_category(cat: Optional[str]) -> Optional[str]:
     if not cat:
         return cat
@@ -97,13 +103,11 @@ def extract_action_from_message(message: str) -> Optional[Dict[str, Any]]:
             "- For add_budget, require category, budgeted (number), and month (YYYY-MM). If month missing, use current month.\n"
             "- For add_transaction, require description (short), amount (number), category, date. Infer category from text if possible.\n"
             "- For update_goal, include id or name (if id not given), and any fields to change: target, current, deadline (YYYY-MM-DD).\n"
-            "- If no clear actionable intent, return {\"action\": \"none\", \"params\": {}}."
+            '- If no clear actionable intent, return {"action": "none", "params": {}}.'
         )
         today = datetime.now().strftime("%Y-%m-%d")
         current_month = datetime.now().strftime("%Y-%m")
-        user = (
-            f"Today: {today}. Current month: {current_month}."
-        )
+        user = f"Today: {today}. Current month: {current_month}."
         resp = groq_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system},
@@ -143,7 +147,18 @@ def extract_action_from_message(message: str) -> Optional[Dict[str, Any]]:
                 try:
                     a = float(amt)
                     # If text suggests expense keywords, force negative
-                    if any(k in message.lower() for k in ["expense", "spend", "paid", "dining", "bought", "purchase", "spent"]):
+                    if any(
+                        k in message.lower()
+                        for k in [
+                            "expense",
+                            "spend",
+                            "paid",
+                            "dining",
+                            "bought",
+                            "purchase",
+                            "spent",
+                        ]
+                    ):
                         a = -abs(a)
                     params["amount"] = a
                 except Exception:
@@ -179,147 +194,523 @@ def extract_action_from_message(message: str) -> Optional[Dict[str, Any]]:
 
 # --- Action execution utilities ---
 
-def run_action(db: Session, uid: int, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Execute a supported action. Returns a result dict with status and item.
+
+def run_action(
+    db: Session, uid: int, action: str, params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Execute a supported action with comprehensive validation and error handling.
+    Returns a result dict with status, message, and item details.
     Shared by chat and /chat/execute endpoint.
     """
-    action = (action or "").lower()
+    action = (action or "").strip().lower()
     result: Dict[str, Any] = {"action": action, "user_id": uid}
 
-    if action == "add_budget":
-        category = params.get("category")
-        budgeted = float(params.get("budgeted", 0) or 0)
-        month = params.get("month")
-        if not category or not month:
-            raise HTTPException(status_code=400, detail="Missing category or month")
-        row = Budget(user_id=uid, category=category, budgeted=budgeted, month=month)
-        db.add(row)
-        try:
-            db.commit(); db.refresh(row)
-        except Exception:
-            db.rollback()
-            raise HTTPException(status_code=400, detail="Budget already exists for this category and month")
-        result.update({"status": "ok", "item": {"id": row.id, "category": row.category, "budgeted": row.budgeted, "month": row.month}})
+    # Validate user exists
+    user = db.query(User).filter(User.id == uid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User with ID {uid} not found")
 
-    elif action == "update_budget":
-        item_id = params.get("id")
-        category = params.get("category")
-        month = params.get("month")
-        budgeted = params.get("budgeted")
-        if item_id:
-            q = db.query(Budget).filter(Budget.user_id == uid, Budget.id == int(item_id))
-        elif category and month:
-            # Case-insensitive match on category to be user-friendly
-            q = db.query(Budget).filter(
-                Budget.user_id == uid,
-                func.lower(Budget.category) == (category or "").lower(),
-                Budget.month == month,
+    # Validate action is supported
+    supported_actions = [
+        "add_budget",
+        "update_budget",
+        "add_goal",
+        "update_goal",
+        "add_transaction",
+        "add_recurring",
+    ]
+    if action not in supported_actions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown action '{action}'. Supported actions: {', '.join(supported_actions)}",
+        )
+
+    try:
+        if action == "add_budget":
+            # Validate required parameters
+            category = params.get("category")
+            budgeted = params.get("budgeted")
+            month = params.get("month")
+
+            if not category or not isinstance(category, str) or not category.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Budget category is required and must be a non-empty string",
+                )
+            if not month or not isinstance(month, str):
+                raise HTTPException(
+                    status_code=400, detail="Month is required in YYYY-MM format"
+                )
+
+            # Validate month format
+            try:
+                datetime.strptime(month, "%Y-%m")
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, detail="Month must be in YYYY-MM format"
+                )
+
+            # Validate budgeted amount
+            try:
+                budgeted = float(budgeted or 0)
+                if budgeted <= 0:
+                    raise HTTPException(
+                        status_code=400, detail="Budget amount must be greater than 0"
+                    )
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400, detail="Budget amount must be a valid number"
+                )
+
+            row = Budget(
+                user_id=uid, category=category.strip(), budgeted=budgeted, month=month
             )
-        else:
-            raise HTTPException(status_code=400, detail="Provide id or (category, month)")
-        row = q.first()
-        if not row:
-            raise HTTPException(status_code=404, detail="Budget not found")
-        if category:
-            row.category = category
-        if month:
-            row.month = month
-        if budgeted is not None:
+            db.add(row)
             try:
-                row.budgeted = float(budgeted)
+                db.commit()
+                db.refresh(row)
+                result.update(
+                    {
+                        "status": "success",
+                        "message": f"Successfully created budget for {category} with ${budgeted:.2f} for {month}",
+                        "item": {
+                            "id": row.id,
+                            "category": row.category,
+                            "budgeted": row.budgeted,
+                            "month": row.month,
+                        },
+                    }
+                )
             except Exception:
-                pass
-        try:
+                db.rollback()
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Budget already exists for {category} in {month}. Try updating it instead.",
+                )
+
+        elif action == "update_budget":
+            item_id = params.get("id")
+            category = params.get("category")
+            month = params.get("month")
+            budgeted = params.get("budgeted")
+
+            # Validate parameters
+            if not item_id and not (category and month):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Provide either budget ID or both category and month",
+                )
+
+            if item_id:
+                try:
+                    item_id = int(item_id)
+                except (TypeError, ValueError):
+                    raise HTTPException(
+                        status_code=400, detail="Budget ID must be a valid number"
+                    )
+                q = db.query(Budget).filter(Budget.user_id == uid, Budget.id == item_id)
+            else:
+                # Validate month format if provided
+                if month:
+                    try:
+                        datetime.strptime(month, "%Y-%m")
+                    except ValueError:
+                        raise HTTPException(
+                            status_code=400, detail="Month must be in YYYY-MM format"
+                        )
+                q = db.query(Budget).filter(
+                    Budget.user_id == uid,
+                    func.lower(Budget.category) == (category or "").lower(),
+                    Budget.month == month,
+                )
+
+            row = q.first()
+            if not row:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Budget not found. Please check the category and month or create a new budget.",
+                )
+
+            # Update fields with validation
+            if category and isinstance(category, str):
+                row.category = category.strip()
+            if month:
+                try:
+                    datetime.strptime(month, "%Y-%m")
+                    row.month = month
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400, detail="Month must be in YYYY-MM format"
+                    )
+            if budgeted is not None:
+                try:
+                    budgeted_val = float(budgeted)
+                    if budgeted_val <= 0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Budget amount must be greater than 0",
+                        )
+                    row.budgeted = budgeted_val
+                except (TypeError, ValueError):
+                    raise HTTPException(
+                        status_code=400, detail="Budget amount must be a valid number"
+                    )
+
+            try:
+                db.commit()
+                result.update(
+                    {
+                        "status": "success",
+                        "message": f"Successfully updated budget for {row.category} to ${row.budgeted:.2f} for {row.month}",
+                        "item": {
+                            "id": row.id,
+                            "category": row.category,
+                            "budgeted": row.budgeted,
+                            "month": row.month,
+                        },
+                    }
+                )
+            except Exception:
+                db.rollback()
+                raise HTTPException(
+                    status_code=400, detail="Failed to update budget due to a conflict"
+                )
+
+        elif action == "add_goal":
+            # Validate required parameters
+            name = params.get("name")
+            target = params.get("target")
+
+            if not name or not isinstance(name, str) or not name.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Goal name is required and must be a non-empty string",
+                )
+
+            try:
+                target = float(target or 0)
+                if target <= 0:
+                    raise HTTPException(
+                        status_code=400, detail="Goal target must be greater than 0"
+                    )
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400, detail="Goal target must be a valid number"
+                )
+
+            try:
+                current = float(params.get("current", 0) or 0)
+                if current < 0:
+                    raise HTTPException(
+                        status_code=400, detail="Current amount cannot be negative"
+                    )
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400, detail="Current amount must be a valid number"
+                )
+
+            deadline = params.get("deadline")
+            d = None
+            if deadline:
+                try:
+                    d = datetime.fromisoformat(deadline).date()
+                    if d < datetime.now().date():
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Goal deadline cannot be in the past",
+                        )
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400, detail="Deadline must be in YYYY-MM-DD format"
+                    )
+
+            row = Goal(
+                user_id=uid,
+                name=name.strip(),
+                target=target,
+                current=current,
+                deadline=d,
+            )
+            db.add(row)
             db.commit()
-        except Exception:
-            db.rollback()
-            raise HTTPException(status_code=400, detail="Budget conflict")
-        result.update({"status": "ok", "item": {"id": row.id, "category": row.category, "budgeted": row.budgeted, "month": row.month}})
+            db.refresh(row)
+            result.update(
+                {
+                    "status": "success",
+                    "message": f"Successfully created goal '{name}' with target ${target:.2f}",
+                    "item": {
+                        "id": row.id,
+                        "name": row.name,
+                        "target": row.target,
+                        "current": row.current,
+                        "deadline": row.deadline.isoformat() if row.deadline else None,
+                    },
+                }
+            )
 
-    elif action == "add_goal":
-        name = params.get("name") or "New Goal"
-        target = float(params.get("target", 0) or 0)
-        current = float(params.get("current", 0) or 0)
-        deadline = params.get("deadline")
-        d = None
-        if deadline:
-            try:
-                d = datetime.fromisoformat(deadline).date()
-            except Exception:
-                d = None
-        row = Goal(user_id=uid, name=name, target=target, current=current, deadline=d)
-        db.add(row); db.commit(); db.refresh(row)
-        result.update({"status": "ok", "item": {"id": row.id, "name": row.name, "target": row.target, "current": row.current, "deadline": row.deadline.isoformat() if row.deadline else None}})
+        elif action == "update_goal":
+            item_id = params.get("id")
+            name = params.get("name")
 
-    elif action == "update_goal":
-        item_id = params.get("id")
-        name = params.get("name")
-        q = None
-        if item_id:
-            q = db.query(Goal).filter(Goal.user_id == uid, Goal.id == int(item_id))
-        elif name:
-            q = db.query(Goal).filter(Goal.user_id == uid, Goal.name == name)
-        else:
-            raise HTTPException(status_code=400, detail="Provide goal id or name")
-        row = q.first()
-        if not row:
-            raise HTTPException(status_code=404, detail="Goal not found")
-        if params.get("name") is not None:
-            row.name = params.get("name")
-        if params.get("target") is not None:
-            try:
-                row.target = float(params.get("target"))
-            except Exception:
-                pass
-        if params.get("current") is not None:
-            try:
-                row.current = float(params.get("current"))
-            except Exception:
-                pass
-        if params.get("deadline"):
-            try:
-                row.deadline = datetime.fromisoformat(params.get("deadline")).date()
-            except Exception:
-                pass
-        db.commit(); db.refresh(row)
-        result.update({"status": "ok", "item": {"id": row.id, "name": row.name, "target": row.target, "current": row.current, "deadline": row.deadline.isoformat() if row.deadline else None}})
+            if not item_id and not name:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Provide either goal ID or name to identify the goal",
+                )
 
-    elif action == "add_transaction":
-        description = params.get("description", "AI Transaction")
-        amount = float(params.get("amount", 0) or 0)
-        category = params.get("category")
-        date_str = params.get("date")
-        d = datetime.now().date()
-        if date_str:
+            q = None
+            if item_id:
+                try:
+                    item_id = int(item_id)
+                except (TypeError, ValueError):
+                    raise HTTPException(
+                        status_code=400, detail="Goal ID must be a valid number"
+                    )
+                q = db.query(Goal).filter(Goal.user_id == uid, Goal.id == item_id)
+            else:
+                q = db.query(Goal).filter(Goal.user_id == uid, Goal.name == name)
+
+            row = q.first()
+            if not row:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Goal not found. Please check the goal name or ID.",
+                )
+
+            # Update fields with validation
+            if params.get("name") is not None and isinstance(params.get("name"), str):
+                new_name = params.get("name").strip()
+                if not new_name:
+                    raise HTTPException(
+                        status_code=400, detail="Goal name cannot be empty"
+                    )
+                row.name = new_name
+
+            if params.get("target") is not None:
+                try:
+                    target_val = float(params.get("target"))
+                    if target_val <= 0:
+                        raise HTTPException(
+                            status_code=400, detail="Goal target must be greater than 0"
+                        )
+                    row.target = target_val
+                except (TypeError, ValueError):
+                    raise HTTPException(
+                        status_code=400, detail="Goal target must be a valid number"
+                    )
+
+            if params.get("current") is not None:
+                try:
+                    current_val = float(params.get("current"))
+                    if current_val < 0:
+                        raise HTTPException(
+                            status_code=400, detail="Current amount cannot be negative"
+                        )
+                    row.current = current_val
+                except (TypeError, ValueError):
+                    raise HTTPException(
+                        status_code=400, detail="Current amount must be a valid number"
+                    )
+
+            if params.get("deadline"):
+                try:
+                    deadline_date = datetime.fromisoformat(
+                        params.get("deadline")
+                    ).date()
+                    if deadline_date < datetime.now().date():
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Goal deadline cannot be in the past",
+                        )
+                    row.deadline = deadline_date
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400, detail="Deadline must be in YYYY-MM-DD format"
+                    )
+
+            db.commit()
+            db.refresh(row)
+            result.update(
+                {
+                    "status": "success",
+                    "message": f"Successfully updated goal '{row.name}'",
+                    "item": {
+                        "id": row.id,
+                        "name": row.name,
+                        "target": row.target,
+                        "current": row.current,
+                        "deadline": row.deadline.isoformat() if row.deadline else None,
+                    },
+                }
+            )
+
+        elif action == "add_transaction":
+            # Validate required parameters
+            description = params.get("description")
+            amount = params.get("amount")
+            category = params.get("category")
+            date_str = params.get("date")
+
+            if (
+                not description
+                or not isinstance(description, str)
+                or not description.strip()
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Transaction description is required and must be a non-empty string",
+                )
+
             try:
-                d = datetime.fromisoformat(date_str).date()
-            except Exception:
-                pass
-        row = Transaction(user_id=uid, description=description, amount=amount, date=d, category=category)
-        db.add(row); db.commit(); db.refresh(row)
-        result.update({"status": "ok", "item": {"id": row.id}})
+                amount = float(amount or 0)
+                if amount == 0:
+                    raise HTTPException(
+                        status_code=400, detail="Transaction amount cannot be zero"
+                    )
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400, detail="Transaction amount must be a valid number"
+                )
 
-    elif action == "add_recurring":
-        description = params.get("description", "Recurring")
-        amount = float(params.get("amount", 0) or 0)
-        category = params.get("category", "Subscriptions")
-        start_date = params.get("start_date")
-        frequency = params.get("frequency", "monthly")
-        interval = int(params.get("interval", 1) or 1)
-        sd = datetime.now().date()
-        if start_date:
+            if not category or not isinstance(category, str):
+                category = "Uncategorized"
+
+            d = datetime.now().date()
+            if date_str:
+                try:
+                    d = datetime.fromisoformat(date_str).date()
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400, detail="Date must be in YYYY-MM-DD format"
+                    )
+
+            row = Transaction(
+                user_id=uid,
+                description=description.strip(),
+                amount=amount,
+                date=d,
+                category=category,
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            tx_type = "income" if amount > 0 else "expense"
+            result.update(
+                {
+                    "status": "success",
+                    "message": f"Successfully added {tx_type}: {description} for ${abs(amount):.2f}",
+                    "item": {
+                        "id": row.id,
+                        "description": row.description,
+                        "amount": row.amount,
+                        "date": row.date.isoformat(),
+                        "category": row.category,
+                    },
+                }
+            )
+
+        elif action == "add_recurring":
+            # Validate required parameters
+            description = params.get("description")
+            amount = params.get("amount")
+            category = params.get("category", "Subscriptions")
+            frequency = params.get("frequency", "monthly")
+
+            if (
+                not description
+                or not isinstance(description, str)
+                or not description.strip()
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Recurring transaction description is required",
+                )
+
             try:
-                sd = datetime.fromisoformat(start_date).date()
-            except Exception:
-                pass
-        row = RecurringTransaction(user_id=uid, description=description, amount=amount, category=category, start_date=sd, frequency=frequency, interval=interval, next_date=sd)
-        db.add(row); db.commit(); db.refresh(row)
-        result.update({"status": "ok", "item": {"id": row.id}})
+                amount = float(amount or 0)
+                if amount == 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Recurring transaction amount cannot be zero",
+                    )
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400, detail="Amount must be a valid number"
+                )
 
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
+            if frequency not in ["daily", "weekly", "monthly", "yearly"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Frequency must be one of: daily, weekly, monthly, yearly",
+                )
 
-    return result
+            try:
+                interval = int(params.get("interval", 1) or 1)
+                if interval <= 0:
+                    raise HTTPException(
+                        status_code=400, detail="Interval must be at least 1"
+                    )
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400, detail="Interval must be a valid number"
+                )
+
+            start_date = params.get("start_date")
+            sd = datetime.now().date()
+            if start_date:
+                try:
+                    sd = datetime.fromisoformat(start_date).date()
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Start date must be in YYYY-MM-DD format",
+                    )
+
+            row = RecurringTransaction(
+                user_id=uid,
+                description=description.strip(),
+                amount=amount,
+                category=category,
+                start_date=sd,
+                frequency=frequency,
+                interval=interval,
+                next_date=sd,
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            result.update(
+                {
+                    "status": "success",
+                    "message": f"Successfully created recurring transaction: {description} (${abs(amount):.2f} every {interval} {frequency})",
+                    "item": {
+                        "id": row.id,
+                        "description": row.description,
+                        "amount": row.amount,
+                        "frequency": row.frequency,
+                        "interval": row.interval,
+                    },
+                }
+            )
+
+        return result
+
+    except HTTPException:
+        # Re-raise HTTP exceptions with proper error details
+        raise
+    except Exception as e:
+        # Log unexpected errors and raise with helpful message
+        print(
+            f"Action execution error - Action: {action}, User: {uid}, Error: {str(e)}"
+        )
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to execute action '{action}': {str(e)}. Please check your parameters and try again.",
+        )
 
 
 def get_user_financial_data(user_id: int, db: Session) -> Dict[str, Any]:
@@ -329,99 +720,118 @@ def get_user_financial_data(user_id: int, db: Session) -> Dict[str, Any]:
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             return {}
-        
+
         # Get recent transactions (last 30 days)
         thirty_days_ago = datetime.now().date() - timedelta(days=30)
-        recent_transactions = db.query(Transaction).filter(
-            and_(Transaction.user_id == user_id, Transaction.date >= thirty_days_ago)
-        ).order_by(desc(Transaction.date)).limit(20).all()
-        
+        recent_transactions = (
+            db.query(Transaction)
+            .filter(
+                and_(
+                    Transaction.user_id == user_id, Transaction.date >= thirty_days_ago
+                )
+            )
+            .order_by(desc(Transaction.date))
+            .limit(20)
+            .all()
+        )
+
         # Get spending by category (current month)
         current_month = datetime.now().strftime("%Y-%m")
         current_month_start = datetime.now().replace(day=1).date()
-        
-        category_spending = db.query(
-            Transaction.category,
-            func.sum(Transaction.amount).label('total')
-        ).filter(
-            and_(
-                Transaction.user_id == user_id,
-                Transaction.date >= current_month_start,
-                Transaction.amount < 0  # Only expenses
+
+        category_spending = (
+            db.query(Transaction.category, func.sum(Transaction.amount).label("total"))
+            .filter(
+                and_(
+                    Transaction.user_id == user_id,
+                    Transaction.date >= current_month_start,
+                    Transaction.amount < 0,  # Only expenses
+                )
             )
-        ).group_by(Transaction.category).all()
-        
+            .group_by(Transaction.category)
+            .all()
+        )
+
         # Get current month budgets
-        current_budgets = db.query(Budget).filter(
-            and_(Budget.user_id == user_id, Budget.month == current_month)
-        ).all()
-        
+        current_budgets = (
+            db.query(Budget)
+            .filter(and_(Budget.user_id == user_id, Budget.month == current_month))
+            .all()
+        )
+
         # Get active goals
-        active_goals = db.query(Goal).filter(Goal.user_id == user_id).order_by(desc(Goal.created_at)).limit(5).all()
-        
+        active_goals = (
+            db.query(Goal)
+            .filter(Goal.user_id == user_id)
+            .order_by(desc(Goal.created_at))
+            .limit(5)
+            .all()
+        )
+
         # Get upcoming recurring transactions
-        upcoming_recurring = db.query(RecurringTransaction).filter(
-            and_(
-                RecurringTransaction.user_id == user_id,
-                RecurringTransaction.next_date <= datetime.now().date() + timedelta(days=7)
+        upcoming_recurring = (
+            db.query(RecurringTransaction)
+            .filter(
+                and_(
+                    RecurringTransaction.user_id == user_id,
+                    RecurringTransaction.next_date
+                    <= datetime.now().date() + timedelta(days=7),
+                )
             )
-        ).order_by(RecurringTransaction.next_date).all()
-        
+            .order_by(RecurringTransaction.next_date)
+            .all()
+        )
+
         # Calculate financial summary
         total_income = sum(t.amount for t in recent_transactions if t.amount > 0)
         total_expenses = sum(abs(t.amount) for t in recent_transactions if t.amount < 0)
         net_worth = total_income - total_expenses
-        
+
         return {
-            'user': {
-                'name': user.name,
-                'email': user.email
+            "user": {"name": user.name, "email": user.email},
+            "summary": {
+                "total_income": total_income,
+                "total_expenses": total_expenses,
+                "net_worth": net_worth,
+                "transaction_count": len(recent_transactions),
             },
-            'summary': {
-                'total_income': total_income,
-                'total_expenses': total_expenses,
-                'net_worth': net_worth,
-                'transaction_count': len(recent_transactions)
-            },
-            'recent_transactions': [
+            "recent_transactions": [
                 {
-                    'description': t.description,
-                    'amount': t.amount,
-                    'date': t.date.strftime('%Y-%m-%d'),
-                    'category': t.category,
-                    'merchant': t.merchant
-                } for t in recent_transactions
+                    "description": t.description,
+                    "amount": t.amount,
+                    "date": t.date.strftime("%Y-%m-%d"),
+                    "category": t.category,
+                    "merchant": t.merchant,
+                }
+                for t in recent_transactions
             ],
-            'category_spending': [
-                {
-                    'category': cat.category,
-                    'spent': abs(cat.total)
-                } for cat in category_spending
+            "category_spending": [
+                {"category": cat.category, "spent": abs(cat.total)}
+                for cat in category_spending
             ],
-            'budgets': [
-                {
-                    'category': b.category,
-                    'budgeted': b.budgeted,
-                    'month': b.month
-                } for b in current_budgets
+            "budgets": [
+                {"category": b.category, "budgeted": b.budgeted, "month": b.month}
+                for b in current_budgets
             ],
-            'goals': [
+            "goals": [
                 {
-                    'name': g.name,
-                    'target': g.target,
-                    'current': g.current,
-                    'progress': (g.current / g.target * 100) if g.target > 0 else 0,
-                    'deadline': g.deadline.strftime('%Y-%m-%d') if g.deadline else None
-                } for g in active_goals
+                    "name": g.name,
+                    "target": g.target,
+                    "current": g.current,
+                    "progress": (g.current / g.target * 100) if g.target > 0 else 0,
+                    "deadline": g.deadline.strftime("%Y-%m-%d") if g.deadline else None,
+                }
+                for g in active_goals
             ],
-            'upcoming_recurring': [
+            "upcoming_recurring": [
                 {
-                    'description': r.description,
-                    'amount': r.amount,
-                    'next_date': r.next_date.strftime('%Y-%m-%d'),
-                    'frequency': r.frequency
-                } for r in upcoming_recurring
-            ]
+                    "description": r.description,
+                    "amount": r.amount,
+                    "next_date": r.next_date.strftime("%Y-%m-%d"),
+                    "frequency": r.frequency,
+                }
+                for r in upcoming_recurring
+            ],
         }
     except Exception as e:
         print(f"Error getting financial data: {e}")
@@ -431,24 +841,25 @@ def get_user_financial_data(user_id: int, db: Session) -> Dict[str, Any]:
 def load_user_context(state: FinanceChatState) -> FinanceChatState:
     """Load user financial data and context"""
     from db.database import SessionLocal
+
     db = SessionLocal()
     try:
         user_data = get_user_financial_data(state["user_id"], db)
         state["user_data"] = user_data
-        
+
         # Build context summary for AI
         context = {}
         if user_data:
             context = {
                 "has_data": True,
-                "recent_activity": len(user_data.get('recent_transactions', [])),
-                "active_budgets": len(user_data.get('budgets', [])),
-                "active_goals": len(user_data.get('goals', [])),
-                "net_worth": user_data.get('summary', {}).get('net_worth', 0)
+                "recent_activity": len(user_data.get("recent_transactions", [])),
+                "active_budgets": len(user_data.get("budgets", [])),
+                "active_goals": len(user_data.get("goals", [])),
+                "net_worth": user_data.get("summary", {}).get("net_worth", 0),
             }
         else:
             context = {"has_data": False}
-        
+
         state["context"] = context
         return state
     finally:
@@ -458,21 +869,23 @@ def load_user_context(state: FinanceChatState) -> FinanceChatState:
 def build_system_prompt(state: FinanceChatState) -> str:
     """Build system prompt with user financial context"""
     user_data = state["user_data"]
-    
+
     if not user_data:
         return """You are FinanceBot, a helpful personal finance assistant. 
 The user needs to log in to access personalized financial insights.
 CRITICAL: Always format your response in HTML with proper tags."""
-    
-    user_info = user_data.get('user', {})
-    summary = user_data.get('summary', {})
-    goals = user_data.get('goals', [])
-    budgets = user_data.get('budgets', [])
-    recent_transactions = user_data.get('recent_transactions', [])[:5]  # Last 5 transactions
-    category_spending = user_data.get('category_spending', [])
-    
-    user_name = user_info.get('name', 'there')
-    
+
+    user_info = user_data.get("user", {})
+    summary = user_data.get("summary", {})
+    goals = user_data.get("goals", [])
+    budgets = user_data.get("budgets", [])
+    recent_transactions = user_data.get("recent_transactions", [])[
+        :5
+    ]  # Last 5 transactions
+    category_spending = user_data.get("category_spending", [])
+
+    user_name = user_info.get("name", "there")
+
     # Build financial summary
     financial_summary = f"""
 Current Financial Snapshot:
@@ -481,17 +894,17 @@ Current Financial Snapshot:
 - Net Position: ${summary.get('net_worth', 0):,.2f}
 - Recent Transactions: {summary.get('transaction_count', 0)}
 """
-    
+
     # Build goals summary
     goals_summary = ""
     if goals:
         goals_summary = "Active Financial Goals:\n"
         for goal in goals[:3]:  # Top 3 goals
-            progress = goal.get('progress', 0)
+            progress = goal.get("progress", 0)
             goals_summary += f"- {goal['name']}: ${goal['current']:,.2f} of ${goal['target']:,.2f} ({progress:.1f}%)\n"
     else:
         goals_summary = "No active financial goals set"
-    
+
     # Build budget summary
     budget_summary = ""
     if budgets:
@@ -500,7 +913,7 @@ Current Financial Snapshot:
             budget_summary += f"- {budget['category']}: ${budget['budgeted']:,.2f}\n"
     else:
         budget_summary = "No budgets set for current month"
-    
+
     # Build spending summary
     spending_summary = ""
     if category_spending:
@@ -509,7 +922,7 @@ Current Financial Snapshot:
             spending_summary += f"- {spending['category']}: ${spending['spent']:,.2f}\n"
     else:
         spending_summary = "No spending data for current month"
-    
+
     return f"""
 You are FinanceBot, a knowledgeable and friendly personal finance assistant for {user_name}.
 
@@ -518,6 +931,8 @@ CRITICAL FORMATTING REQUIREMENT: Always format your response as clean, well-stru
 Your responses should be:
 - Conversational and helpful, like talking to a trusted financial advisor
 - Well-formatted using HTML tags (h3, p, ul, li, strong, em, div, etc.)
+- CONCISE but COMPLETE - provide full analysis without cutting off mid-sentence
+- Use bullet points for clarity and brevity
 - Use HTML lists for recommendations and bullet points
 - Use HTML tables for financial data when appropriate
 - Use HTML headings for section organization
@@ -533,6 +948,7 @@ HTML FORMATTING GUIDELINES:
 - Use <table> with inline styles for financial data
 - Add inline styles for colors, spacing, and layout
 - Use <div> with styles for better visual organization
+- IMPORTANT: Always complete your response - never cut off mid-sentence or mid-table
 
 USER FINANCIAL CONTEXT:
 {financial_summary}
@@ -549,6 +965,8 @@ When providing advice or insights:
 3. Help them understand their financial health
 4. Suggest improvements to budgets, goals, or spending habits
 5. Format everything in clean HTML with appropriate styling
+6. Keep responses focused and to-the-point with bullet points
+7. ALWAYS complete your thoughts - finish tables, lists, and sentences
 
 Example HTML format for financial insights:
 <h3 style="color: #27ae60; margin-bottom: 10px;">💰 Financial Insights</h3>
@@ -566,37 +984,43 @@ def finance_chat_node(state: FinanceChatState) -> FinanceChatState:
     try:
         # Get the last user message
         last_message = state["messages"][-1]["content"]
-        
+
         # Build system prompt with financial context
         system_prompt = build_system_prompt(state)
-        
+
         # Call Groq API
         response = groq_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": last_message}
+                {"role": "user", "content": last_message},
             ],
             model="openai/gpt-oss-20b",
+<<<<<<< HEAD
             max_tokens=1000,
+            temperature=0.7,
+=======
             temperature=0.7
+>>>>>>> 9c9a7f5e7f78fb732ae311e690b2d3d7343aa251
         )
-        
+
         ai_response = response.choices[0].message.content
-        
+
         # Ensure HTML formatting
-        if not ai_response.strip().startswith('<'):
+        if not ai_response.strip().startswith("<"):
             ai_response = f"<p>{ai_response}</p>"
-        
+
         # Add AI response to conversation
-        state["messages"].append({
-            "role": "assistant",
-            "content": ai_response,
-            "timestamp": datetime.now().isoformat()
-        })
-        
+        state["messages"].append(
+            {
+                "role": "assistant",
+                "content": ai_response,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+
         state["response"] = ai_response
         return state
-        
+
     except Exception as e:
         print(f"Chat error: {e}")
         error_response = f"<p style='color: #e74c3c;'><strong>I'm experiencing technical difficulties.</strong> Please try again later. Error: {str(e)}</p>"
@@ -608,17 +1032,18 @@ def finance_chat_node(state: FinanceChatState) -> FinanceChatState:
 def create_finance_chat_graph():
     """Create LangGraph workflow for finance chat"""
     workflow = StateGraph(FinanceChatState)
-    
+
     # Add nodes
     workflow.add_node("load_context", load_user_context)
     workflow.add_node("chat", finance_chat_node)
-    
+
     # Add edges
     workflow.set_entry_point("load_context")
     workflow.add_edge("load_context", "chat")
     workflow.add_edge("chat", END)
-    
+
     return workflow.compile()
+
 
 # Initialize the graph
 finance_chat_graph = create_finance_chat_graph()
@@ -685,16 +1110,14 @@ def process_finance_chat(user_id: int, message: str) -> str:
     except Exception as e:
         print(f"Finance chat error: {e}")
         import traceback
+
         traceback.print_exc()
-        return (
-            "<p style='color: #e74c3c;'><strong>Sorry, I'm having trouble processing your request.</strong> Please try again later.</p>"
-        )
+        return "<p style='color: #e74c3c;'><strong>Sorry, I'm having trouble processing your request.</strong> Please try again later.</p>"
 
 
 @router.post("/chat")
 async def chat(
-    request: ChatRequest, 
-    current_user: User = Depends(get_current_user)
+    request: ChatRequest, current_user: User = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """Advanced finance chatbot with LangGraph workflow and context"""
     try:
@@ -722,7 +1145,9 @@ async def chat(
         if action_info and action_info.get("action"):
             try:
                 db = SessionLocal()
-                action_result = run_action(db, uid, action_info["action"], action_info.get("params", {}))
+                action_result = run_action(
+                    db, uid, action_info["action"], action_info.get("params", {})
+                )
                 executed = True
                 # Append a brief confirmation to the HTML response
                 summary = f"<div style='margin-top:10px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;color:#1f2937;'>✅ Executed action: <strong>{action_info['action']}</strong></div>"
@@ -748,12 +1173,12 @@ async def chat(
             "executed": executed,
             "result": action_result,
         }
-        
+
     except Exception as e:
         print(f"Chat endpoint error: {e}")
         return {
             "response": "<p style='color: #e74c3c;'>I'm having trouble connecting right now. Please try again later.</p>",
-            "error": str(e)
+            "error": str(e),
         }
 
 
@@ -764,7 +1189,9 @@ class ExecuteRequest(BaseModel):
 
 
 @router.post("/chat/execute")
-async def execute_suggestion(req: ExecuteRequest, current_user: User = Depends(get_current_user)):
+async def execute_suggestion(
+    req: ExecuteRequest, current_user: User = Depends(get_current_user)
+):
     """Execute a suggested action using DB write operations."""
     db = SessionLocal()
     try:

@@ -3,6 +3,8 @@ import { useApp } from "@store/AppContext";
 import { listTransactionsAPI, deleteTransactionAPI } from "@api/finance";
 import LoadingSpinner from "@components/ui/LoadingSpinner";
 import Button from "@components/ui/Button";
+import BulkUpload from "@components/features/BulkUpload";
+import UPIIntegration from "@components/features/UPIIntegration";
 
 const TransactionsPage = () => {
   const { state } = useApp();
@@ -10,6 +12,8 @@ const TransactionsPage = () => {
   const [transactions, setTransactions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [showUPIUpload, setShowUPIUpload] = useState(false);
 
   const load = async () => {
     try {
@@ -33,6 +37,18 @@ const TransactionsPage = () => {
     if (userId) {
       load();
     }
+  }, [userId]);
+
+  // Listen for data updates
+  useEffect(() => {
+    const handleUpdate = (event) => {
+      if (event.detail?.entity === "transactions") {
+        load();
+      }
+    };
+    window.addEventListener("finance:data-updated", handleUpdate);
+    return () =>
+      window.removeEventListener("finance:data-updated", handleUpdate);
   }, [userId]);
 
   if (!userId) {
@@ -70,6 +86,48 @@ const TransactionsPage = () => {
     <div className="max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">All Transactions</h1>
+        <div className="flex gap-3">
+          <Button
+            onClick={() => setShowUPIUpload(true)}
+            variant="secondary"
+            className="flex items-center gap-2"
+          >
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+            Add UPI
+          </Button>
+          <Button
+            onClick={() => setShowBulkUpload(true)}
+            variant="primary"
+            className="flex items-center gap-2"
+          >
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+              />
+            </svg>
+            Bulk Upload
+          </Button>
+        </div>
       </div>
 
       <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -123,6 +181,24 @@ const TransactionsPage = () => {
           </tbody>
         </table>
       </div>
+
+      {/* Modals */}
+      <BulkUpload
+        isOpen={showBulkUpload}
+        onClose={() => setShowBulkUpload(false)}
+        userId={userId}
+        onSuccess={() => {
+          load();
+        }}
+      />
+      <UPIIntegration
+        isOpen={showUPIUpload}
+        onClose={() => setShowUPIUpload(false)}
+        userId={userId}
+        onSuccess={() => {
+          load();
+        }}
+      />
     </div>
   );
 };

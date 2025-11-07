@@ -10,13 +10,20 @@ from api.deps import safe_uid, get_user_or_404
 
 router = APIRouter()
 
+
 @router.get("/transactions/{user_id}")
 async def get_transactions(user_id: str, db: Session = Depends(get_db)):
+    """
+    Get all transactions for a user with optimized query limiting.
+    Returns maximum 1000 recent transactions to prevent performance issues.
+    For older data, consider adding pagination parameters.
+    """
     uid = safe_uid(user_id)
     rows = (
         db.query(dbm.Transaction)
         .filter(dbm.Transaction.user_id == uid)
         .order_by(dbm.Transaction.date.desc(), dbm.Transaction.id.desc())
+        .limit(1000)  # Limit to prevent loading too many records
         .all()
     )
     return [
@@ -33,6 +40,7 @@ async def get_transactions(user_id: str, db: Session = Depends(get_db)):
         for r in rows
     ]
 
+
 @router.post("/transactions/{user_id}")
 async def add_transaction(user_id: str, tx: TxSchema, db: Session = Depends(get_db)):
     uid = safe_uid(user_id)
@@ -48,6 +56,7 @@ async def add_transaction(user_id: str, tx: TxSchema, db: Session = Depends(get_
     db.commit()
     count = db.query(dbm.Transaction).filter(dbm.Transaction.user_id == uid).count()
     return {"message": "Transaction added", "count": count}
+
 
 @router.get("/transactions/{user_id}/{item_id}")
 async def get_transaction(user_id: str, item_id: int, db: Session = Depends(get_db)):
@@ -70,8 +79,11 @@ async def get_transaction(user_id: str, item_id: int, db: Session = Depends(get_
         "recurring_id": row.recurring_id,
     }
 
+
 @router.put("/transactions/{user_id}/{item_id}")
-async def update_transaction(user_id: str, item_id: int, tx: TxSchema, db: Session = Depends(get_db)):
+async def update_transaction(
+    user_id: str, item_id: int, tx: TxSchema, db: Session = Depends(get_db)
+):
     uid = safe_uid(user_id)
     row = (
         db.query(dbm.Transaction)
@@ -86,16 +98,20 @@ async def update_transaction(user_id: str, item_id: int, tx: TxSchema, db: Sessi
     row.category = tx.category
     db.commit()
     db.refresh(row)
-    return {"message": "Transaction updated", "item": {
-        "id": row.id,
-        "description": row.description,
-        "amount": row.amount,
-        "date": row.date.isoformat(),
-        "category": row.category,
-        "merchant": row.merchant,
-        "account_type": row.account_type,
-        "recurring_id": row.recurring_id,
-    }}
+    return {
+        "message": "Transaction updated",
+        "item": {
+            "id": row.id,
+            "description": row.description,
+            "amount": row.amount,
+            "date": row.date.isoformat(),
+            "category": row.category,
+            "merchant": row.merchant,
+            "account_type": row.account_type,
+            "recurring_id": row.recurring_id,
+        },
+    }
+
 
 @router.delete("/transactions/{user_id}/{item_id}")
 async def delete_transaction(user_id: str, item_id: int, db: Session = Depends(get_db)):

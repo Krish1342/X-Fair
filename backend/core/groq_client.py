@@ -45,7 +45,7 @@ class GroqClient:
             "messages": formatted_messages,
             "model": model,
             "temperature": temperature,
-            "max_tokens": 1024,
+            "max_tokens": 4096,  # Increased from 1024 to allow longer responses
             "top_p": 1,
             "stream": False
         }
@@ -91,7 +91,8 @@ class GroqClient:
 - Tax planning and optimization
 - Retirement and estate planning
 
-Provide clear, actionable financial advice based on the user's query. Be specific and practical in your recommendations."""
+Provide clear, actionable financial advice based on the user's query. Be specific and practical in your recommendations.
+Keep responses concise but complete - use bullet points and structured format for clarity."""
 
         # Build context string
         context_str = ""

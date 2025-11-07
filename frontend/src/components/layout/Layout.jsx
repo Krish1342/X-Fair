@@ -13,7 +13,7 @@ import Toast from "@components/ui/Toast";
 import LoadingSpinner from "@components/ui/LoadingSpinner";
 
 const Layout = ({ children }) => {
-  const { showLogin, isLoading, toast, error } = useAppState();
+  const { showLogin, isLoading, toast, error, user } = useAppState();
   const { clearError, clearToast } = useAppActions();
 
   return (
@@ -36,8 +36,8 @@ const Layout = ({ children }) => {
       {/* Footer */}
       <Footer />
 
-      {/* Simple ChatBot */}
-      <ChatBot />
+      {/* Simple ChatBot - Only show when user is logged in */}
+      {user && <ChatBot />}
 
       {/* Login Modal */}
       {showLogin && <LoginModal />}

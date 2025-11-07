@@ -26,6 +26,7 @@ from api.routers.budgets_router import router as budgets_router
 from api.routers.recurring_router import router as recurring_router
 from api.routers.workflow_router import router as workflow_router
 from api.routers.system_router import router as system_router
+from api.routers.upload_router import router as upload_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -44,6 +45,7 @@ app = FastAPI(
 Base.metadata.create_all(bind=engine)
 try:
     from db.seed import seed_demo
+
     seed_demo()
 except Exception as _e:
     logger.warning(f"Seeding skipped or failed: {_e}")
@@ -70,6 +72,7 @@ app.include_router(transactions_router, prefix="/api/v1")
 app.include_router(goals_router, prefix="/api/v1")
 app.include_router(budgets_router, prefix="/api/v1")
 app.include_router(recurring_router, prefix="/api/v1")
+app.include_router(upload_router, prefix="/api/v1", tags=["upload"])
 
 
 @app.get("/")
@@ -86,7 +89,11 @@ async def root():
 @app.get("/health")
 async def health_check():
     groq_status = "healthy" if groq_client.api_key else "missing_api_key"
-    return {"status": "healthy", "service": "finance-agent-api", "groq_integration": groq_status}
+    return {
+        "status": "healthy",
+        "service": "finance-agent-api",
+        "groq_integration": groq_status,
+    }
 
 
 if __name__ == "__main__":

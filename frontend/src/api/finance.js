@@ -80,3 +80,17 @@ export const generateRecurringAPI = (userId, up_to) =>
       params: up_to ? { up_to } : {},
     })
     .then((r) => r.data);
+
+// Upload - Bulk Transactions and UPI Integration
+export const uploadTransactionsAPI = (userId, file) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  return http
+    .post(`/upload/transactions/${userId}`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    })
+    .then((r) => r.data);
+};
+
+export const uploadUPIMessageAPI = (userId, message) =>
+  http.post(`/upload/upi/${userId}`, { message }).then((r) => r.data);
