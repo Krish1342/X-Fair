@@ -20,6 +20,7 @@ const LoginModal = ({ isOpen, onClose }) => {
     name: "",
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [isDemoLoading, setIsDemoLoading] = useState(false);
   const [toast, setToast] = useState(null);
 
   const showToast = (message, type = "info") => {
@@ -117,7 +118,10 @@ const LoginModal = ({ isOpen, onClose }) => {
   };
 
   const handleDemoLogin = async () => {
-    setIsLoading(true);
+    // Prevent multiple clicks
+    if (isDemoLoading) return;
+
+    setIsDemoLoading(true);
     try {
       // Demo credentials
       const response = await loginAPI({
@@ -135,16 +139,26 @@ const LoginModal = ({ isOpen, onClose }) => {
       });
 
       localStorage.setItem("finance_token", response.token);
-      showToast("Demo login successful! Welcome to the demo!", "success");
 
+      // Show success toast
+      showToast(
+        "Demo login successful! Redirecting to dashboard...",
+        "success"
+      );
+
+      // Auto-redirect after 1 second
       setTimeout(() => {
         onClose();
-      }, 1500);
+        // Navigate to dashboard if available
+        if (window.location.pathname !== "/dashboard") {
+          window.location.href = "/dashboard";
+        }
+      }, 1000);
     } catch (error) {
       showToast("Demo login failed. Please try again.", "error");
-    } finally {
-      setIsLoading(false);
+      setIsDemoLoading(false);
     }
+    // Don't set loading to false here - let the redirect happen
   };
 
   const toggleMode = () => {
@@ -252,6 +266,7 @@ const LoginModal = ({ isOpen, onClose }) => {
               variant="primary"
               size="lg"
               isLoading={isLoading}
+              disabled={isLoading || isDemoLoading}
               className="w-full"
             >
               {isLogin ? "Sign In" : "Create Account"}
@@ -277,6 +292,7 @@ const LoginModal = ({ isOpen, onClose }) => {
               variant="outline"
               size="lg"
               className="w-full"
+              disabled={isLoading || isDemoLoading}
             >
               <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
                 <path
@@ -316,9 +332,10 @@ const LoginModal = ({ isOpen, onClose }) => {
               variant="primary"
               size="lg"
               className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
-              isLoading={isLoading}
+              isLoading={isDemoLoading}
+              disabled={isDemoLoading || isLoading}
             >
-              🚀 Try Demo Account
+              {isDemoLoading ? "Logging in..." : "🚀 Try Demo Account"}
             </Button>
 
             <p className="text-xs text-center text-gray-500 mt-2">
