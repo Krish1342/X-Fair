@@ -39,10 +39,8 @@ const Dashboard = () => {
   const [modalType, setModalType] = useState("transaction");
   const [modalMode, setModalMode] = useState("create");
   const [selectedItem, setSelectedItem] = useState(null);
-<<<<<<< HEAD
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [showUPIUpload, setShowUPIUpload] = useState(false);
-=======
   // Section loading/error states
   const [txLoading, setTxLoading] = useState(false);
   const [txError, setTxError] = useState(null);
@@ -56,7 +54,6 @@ const Dashboard = () => {
   const [toast, setToast] = useState(null);
   const showToast = (message, type = "info") => setToast({ message, type });
   const hideToast = () => setToast(null);
->>>>>>> 9c9a7f5e7f78fb732ae311e690b2d3d7343aa251
 
   useEffect(() => {
     loadDashboardData();

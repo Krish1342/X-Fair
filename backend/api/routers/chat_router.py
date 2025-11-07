@@ -995,12 +995,8 @@ def finance_chat_node(state: FinanceChatState) -> FinanceChatState:
                 {"role": "user", "content": last_message},
             ],
             model="openai/gpt-oss-20b",
-<<<<<<< HEAD
             max_tokens=1000,
-            temperature=0.7,
-=======
             temperature=0.7
->>>>>>> 9c9a7f5e7f78fb732ae311e690b2d3d7343aa251
         )
 
         ai_response = response.choices[0].message.content
