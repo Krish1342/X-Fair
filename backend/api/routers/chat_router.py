@@ -931,6 +931,8 @@ CRITICAL FORMATTING REQUIREMENT: Always format your response as clean, well-stru
 Your responses should be:
 - Conversational and helpful, like talking to a trusted financial advisor
 - Well-formatted using HTML tags (h3, p, ul, li, strong, em, div, etc.)
+- CONCISE but COMPLETE - provide full analysis without cutting off mid-sentence
+- Use bullet points for clarity and brevity
 - Use HTML lists for recommendations and bullet points
 - Use HTML tables for financial data when appropriate
 - Use HTML headings for section organization
@@ -946,6 +948,7 @@ HTML FORMATTING GUIDELINES:
 - Use <table> with inline styles for financial data
 - Add inline styles for colors, spacing, and layout
 - Use <div> with styles for better visual organization
+- IMPORTANT: Always complete your response - never cut off mid-sentence or mid-table
 
 USER FINANCIAL CONTEXT:
 {financial_summary}
@@ -962,6 +965,8 @@ When providing advice or insights:
 3. Help them understand their financial health
 4. Suggest improvements to budgets, goals, or spending habits
 5. Format everything in clean HTML with appropriate styling
+6. Keep responses focused and to-the-point with bullet points
+7. ALWAYS complete your thoughts - finish tables, lists, and sentences
 
 Example HTML format for financial insights:
 <h3 style="color: #27ae60; margin-bottom: 10px;">💰 Financial Insights</h3>
@@ -990,8 +995,12 @@ def finance_chat_node(state: FinanceChatState) -> FinanceChatState:
                 {"role": "user", "content": last_message},
             ],
             model="openai/gpt-oss-20b",
+<<<<<<< HEAD
             max_tokens=1000,
             temperature=0.7,
+=======
+            temperature=0.7
+>>>>>>> 9c9a7f5e7f78fb732ae311e690b2d3d7343aa251
         )
 
         ai_response = response.choices[0].message.content

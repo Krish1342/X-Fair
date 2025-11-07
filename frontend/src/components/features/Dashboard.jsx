@@ -21,10 +21,11 @@ import BulkUpload from "@components/features/BulkUpload";
 import UPIIntegration from "@components/features/UPIIntegration";
 import LoadingSpinner from "@ui/LoadingSpinner";
 import Button from "@ui/Button";
+import Toast from "@ui/Toast";
 import { cn } from "@utils";
 
 const Dashboard = () => {
-  const { state, dispatch, setToast } = useApp();
+  const { state, dispatch } = useApp();
   const navigate = useNavigate();
   const [dashboardData, setDashboardData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -38,8 +39,24 @@ const Dashboard = () => {
   const [modalType, setModalType] = useState("transaction");
   const [modalMode, setModalMode] = useState("create");
   const [selectedItem, setSelectedItem] = useState(null);
+<<<<<<< HEAD
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [showUPIUpload, setShowUPIUpload] = useState(false);
+=======
+  // Section loading/error states
+  const [txLoading, setTxLoading] = useState(false);
+  const [txError, setTxError] = useState(null);
+  const [goalsLoading, setGoalsLoading] = useState(false);
+  const [goalsError, setGoalsError] = useState(null);
+  const [budgetsLoading, setBudgetsLoading] = useState(false);
+  const [budgetsError, setBudgetsError] = useState(null);
+  const [recurringLoading, setRecurringLoading] = useState(false);
+  const [recurringError, setRecurringError] = useState(null);
+  // Toast state
+  const [toast, setToast] = useState(null);
+  const showToast = (message, type = "info") => setToast({ message, type });
+  const hideToast = () => setToast(null);
+>>>>>>> 9c9a7f5e7f78fb732ae311e690b2d3d7343aa251
 
   useEffect(() => {
     loadDashboardData();
@@ -130,20 +147,46 @@ const Dashboard = () => {
     }
   };
 
+  // Sectional loading/error for each list
   const loadUserLists = async (userId) => {
+    setTxLoading(true);
+    setGoalsLoading(true);
+    setBudgetsLoading(true);
+    setRecurringLoading(true);
+    setTxError(null);
+    setGoalsError(null);
+    setBudgetsError(null);
+    setRecurringError(null);
     try {
       const [tx, gl, bd, rc] = await Promise.all([
-        listTransactionsAPI(userId),
-        listGoalsAPI(userId),
-        listBudgetsAPI(userId),
-        listRecurringAPI(userId),
+        listTransactionsAPI(userId).catch((e) => {
+          setTxError(e.message || "Failed to load transactions");
+          return [];
+        }),
+        listGoalsAPI(userId).catch((e) => {
+          setGoalsError(e.message || "Failed to load goals");
+          return [];
+        }),
+        listBudgetsAPI(userId).catch((e) => {
+          setBudgetsError(e.message || "Failed to load budgets");
+          return [];
+        }),
+        listRecurringAPI(userId).catch((e) => {
+          setRecurringError(e.message || "Failed to load recurring");
+          return [];
+        }),
       ]);
       setTransactions(tx || []);
       setGoalsList(gl || []);
       setBudgets(bd || []);
       setRecurring(rc || []);
     } catch (e) {
-      console.error("Failed loading user lists", e);
+      showToast("Failed to load user data", "error");
+    } finally {
+      setTxLoading(false);
+      setGoalsLoading(false);
+      setBudgetsLoading(false);
+      setRecurringLoading(false);
     }
   };
 
@@ -188,7 +231,7 @@ const Dashboard = () => {
             We're having trouble connecting to the server. Please check your
             connection and try again.
           </p>
-          <Button onClick={loadDashboardData} variant="primary">
+          <Button onClick={() => loadDashboardData(false)} variant="primary">
             Try Again
           </Button>
         </div>
@@ -367,64 +410,98 @@ const Dashboard = () => {
               </div>
             )}
           </div>
-          <div className="space-y-3">
-            {(state.user
-              ? [...(transactions || [])]
-                  .sort((a, b) => new Date(b.date) - new Date(a.date))
-                  .slice(0, 5)
-              : (recentTransactions || []).slice(0, 5)
-            ).map((transaction, index) => (
-              <TransactionItem
-                key={index}
-                transaction={transaction}
-                onEdit={() => {
-                  setModalType("transaction");
-                  setModalMode("edit");
-                  setSelectedItem(transaction);
-                  setModalOpen(true);
-                }}
-                onDelete={async () => {
-                  try {
-                    if (!state.user?.id || !transaction?.id) return;
-                    await deleteTransactionAPI(state.user.id, transaction.id);
-                    await loadUserLists(state.user.id);
-                    await loadDashboardData(true);
-                    window.dispatchEvent(
-                      new CustomEvent("finance:data-updated", {
-                        detail: { entity: "transaction", action: "delete" },
-                      })
-                    );
-                  } catch (e) {
-                    console.error("Delete transaction failed", e);
-                  }
-                }}
-                canManage={!!state.user}
-              />
-            ))}
-            {state.user && (transactions?.length || 0) > 5 && (
-              <div className="pt-1">
-                <button
-                  className="text-sm text-blue-600 hover:underline inline-flex items-center"
-                  onClick={() => navigate("/transactions")}
-                >
-                  See all
-                  <span className="ml-1" aria-hidden>
-                    →
-                  </span>
-                </button>
-              </div>
-            )}
-            {state.user && transactions.length === 0 && (
-              <p className="text-gray-500 text-center py-4">
-                No recent transactions yet. Add your first one.
-              </p>
-            )}
-            {!state.user && recentTransactions.length === 0 && (
-              <p className="text-gray-500 text-center py-4">
-                No recent transactions
-              </p>
-            )}
-          </div>
+          {/* Section error boundary */}
+          {txError ? (
+            <div className="text-center py-4">
+              <div className="text-red-600 mb-2">{txError}</div>
+              <Button
+                onClick={() => loadUserLists(state.user.id)}
+                variant="primary"
+              >
+                Retry
+              </Button>
+            </div>
+          ) : txLoading ? (
+            <div className="flex justify-center py-6">
+              <LoadingSpinner size="md" />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {(state.user
+                ? [...(transactions || [])]
+                    .sort((a, b) => new Date(b.date) - new Date(a.date))
+                    .slice(0, 5)
+                : (recentTransactions || []).slice(0, 5)
+              ).map((transaction, index) => (
+                <TransactionItem
+                  key={index}
+                  transaction={transaction}
+                  onEdit={() => {
+                    setModalType("transaction");
+                    setModalMode("edit");
+                    setSelectedItem(transaction);
+                    setModalOpen(true);
+                  }}
+                  onDelete={async () => {
+                    try {
+                      if (!state.user?.id || !transaction?.id) return;
+                      await deleteTransactionAPI(state.user.id, transaction.id);
+                      await loadUserLists(state.user.id);
+                      await loadDashboardData(true);
+                      window.dispatchEvent(
+                        new CustomEvent("finance:data-updated", {
+                          detail: { entity: "transaction", action: "delete" },
+                        })
+                      );
+                    } catch (e) {
+                      showToast("Delete transaction failed", "error");
+                    }
+                  }}
+                  canManage={!!state.user}
+                />
+              ))}
+              {state.user && (transactions?.length || 0) > 5 && (
+                <div className="pt-1">
+                  <button
+                    className="text-sm text-blue-600 hover:underline inline-flex items-center"
+                    onClick={() => navigate("/transactions")}
+                  >
+                    See all
+                    <span className="ml-1" aria-hidden>
+                      →
+                    </span>
+                  </button>
+                </div>
+              )}
+              {state.user && transactions.length === 0 && (
+                <div className="flex flex-col items-center py-4">
+                  <span className="text-3xl mb-2">🧾</span>
+                  <p className="text-gray-500 text-center">
+                    No recent transactions yet. Add your first one.
+                  </p>
+                  <Button
+                    className="mt-2"
+                    onClick={() => {
+                      setModalType("transaction");
+                      setModalMode("create");
+                      setSelectedItem(null);
+                      setModalOpen(true);
+                    }}
+                  >
+                    Add Transaction
+                  </Button>
+                </div>
+              )}
+              {!state.user && recentTransactions.length === 0 && (
+                <div className="flex flex-col items-center py-4">
+                  <span className="text-3xl mb-2">🧾</span>
+                  <p className="text-gray-500 text-center">
+                    No recent transactions
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Goals + Recurring side-by-side */}
@@ -447,46 +524,80 @@ const Dashboard = () => {
                 </button>
               )}
             </div>
-            <div className="space-y-3">
-              {(state.user ? goalsList : goals).map((goal, index) => (
-                <GoalItem
-                  key={index}
-                  goal={goal}
-                  canManage={!!state.user}
-                  onEdit={() => {
-                    setModalType("goal");
-                    setModalMode("edit");
-                    setSelectedItem(goal);
-                    setModalOpen(true);
-                  }}
-                  onDelete={async () => {
-                    try {
-                      if (!state.user?.id || !goal?.id) return;
-                      await deleteGoalAPI(state.user.id, goal.id);
-                      await loadUserLists(state.user.id);
-                      await loadDashboardData(true);
-                      window.dispatchEvent(
-                        new CustomEvent("finance:data-updated", {
-                          detail: { entity: "goal", action: "delete" },
-                        })
-                      );
-                    } catch (e) {
-                      console.error("Delete goal failed", e);
-                    }
-                  }}
-                />
-              ))}
-              {state.user && goalsList.length === 0 && (
-                <p className="text-gray-500 text-center py-4">
-                  No goals set yet. Create your first goal.
-                </p>
-              )}
-              {!state.user && goals.length === 0 && (
-                <p className="text-gray-500 text-center py-4">
-                  No goals set yet
-                </p>
-              )}
-            </div>
+            {/* Section error boundary */}
+            {goalsError ? (
+              <div className="text-center py-4">
+                <div className="text-red-600 mb-2">{goalsError}</div>
+                <Button
+                  onClick={() => loadUserLists(state.user.id)}
+                  variant="primary"
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : goalsLoading ? (
+              <div className="flex justify-center py-6">
+                <LoadingSpinner size="md" />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {(state.user ? goalsList : goals).map((goal, index) => (
+                  <GoalItem
+                    key={index}
+                    goal={goal}
+                    canManage={!!state.user}
+                    onEdit={() => {
+                      setModalType("goal");
+                      setModalMode("edit");
+                      setSelectedItem(goal);
+                      setModalOpen(true);
+                    }}
+                    onDelete={async () => {
+                      try {
+                        if (!state.user?.id || !goal?.id) return;
+                        await deleteGoalAPI(state.user.id, goal.id);
+                        await loadUserLists(state.user.id);
+                        await loadDashboardData(true);
+                        window.dispatchEvent(
+                          new CustomEvent("finance:data-updated", {
+                            detail: { entity: "goal", action: "delete" },
+                          })
+                        );
+                      } catch (e) {
+                        showToast("Delete goal failed", "error");
+                      }
+                    }}
+                  />
+                ))}
+                {state.user && goalsList.length === 0 && (
+                  <div className="flex flex-col items-center py-4">
+                    <span className="text-3xl mb-2">🎯</span>
+                    <p className="text-gray-500 text-center">
+                      No goals set yet. Create your first goal.
+                    </p>
+                    <Button
+                      className="mt-2"
+                      onClick={() => {
+                        setModalType("goal");
+                        setModalMode("create");
+                        setSelectedItem(null);
+                        setModalOpen(true);
+                      }}
+                    >
+                      Add Goal
+                    </Button>
+                  </div>
+                )}
+                {!state.user && goals.length === 0 && (
+                  <div className="flex flex-col items-center py-4">
+                    <span className="text-3xl mb-2">🎯</span>
+                    <p className="text-gray-500 text-center">
+                      No goals set yet
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Recurring */}
@@ -531,17 +642,10 @@ const Dashboard = () => {
                                   res.count === 1 ? "" : "s"
                                 } generated`
                               : "No recurring transactions were due";
-                          setToast({
-                            message: msg,
-                            type: res.count > 0 ? "success" : "info",
-                          });
+                          showToast(msg, res.count > 0 ? "success" : "info");
                         }
                       } catch (e) {
-                        console.error("Generate recurring failed", e);
-                        setToast({
-                          message: "Failed to generate transactions",
-                          type: "error",
-                        });
+                        showToast("Failed to generate transactions", "error");
                       }
                     }}
                   >
@@ -550,65 +654,96 @@ const Dashboard = () => {
                 </div>
               )}
             </div>
-            <div className="space-y-3">
-              {recurring.map((r) => (
-                <div key={r.id} className="p-3 bg-gray-50 rounded-lg border">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <p className="font-medium">{r.description}</p>
-                      <p className="text-sm text-gray-600">
-                        {r.category} • ${r.amount} • {r.frequency}
-                        {r.interval && r.interval > 1
-                          ? ` x${r.interval}`
-                          : ""}{" "}
-                        • next: {r.next_date}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        className="text-xs px-2 py-1 rounded border"
-                        onClick={() => {
-                          setModalType("recurring");
-                          setModalMode("edit");
-                          setSelectedItem(r);
-                          setModalOpen(true);
-                        }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="text-xs px-2 py-1 rounded border text-red-600"
-                        onClick={async () => {
-                          try {
-                            if (!state.user?.id) return;
-                            await deleteRecurringAPI(state.user.id, r.id);
-                            await loadUserLists(state.user.id);
-                            await loadDashboardData(true);
-                            window.dispatchEvent(
-                              new CustomEvent("finance:data-updated", {
-                                detail: {
-                                  entity: "recurring",
-                                  action: "delete",
-                                },
-                              })
-                            );
-                          } catch (e) {
-                            console.error("Delete recurring failed", e);
-                          }
-                        }}
-                      >
-                        Delete
-                      </button>
+            {/* Section error boundary */}
+            {recurringError ? (
+              <div className="text-center py-4">
+                <div className="text-red-600 mb-2">{recurringError}</div>
+                <Button
+                  onClick={() => loadUserLists(state.user.id)}
+                  variant="primary"
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : recurringLoading ? (
+              <div className="flex justify-center py-6">
+                <LoadingSpinner size="md" />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {recurring.map((r) => (
+                  <div key={r.id} className="p-3 bg-gray-50 rounded-lg border">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <p className="font-medium">{r.description}</p>
+                        <p className="text-sm text-gray-600">
+                          {r.category} • ${r.amount} • {r.frequency}
+                          {r.interval && r.interval > 1
+                            ? ` x${r.interval}`
+                            : ""}{" "}
+                          • next: {r.next_date}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          className="text-xs px-2 py-1 rounded border"
+                          onClick={() => {
+                            setModalType("recurring");
+                            setModalMode("edit");
+                            setSelectedItem(r);
+                            setModalOpen(true);
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="text-xs px-2 py-1 rounded border text-red-600"
+                          onClick={async () => {
+                            try {
+                              if (!state.user?.id) return;
+                              await deleteRecurringAPI(state.user.id, r.id);
+                              await loadUserLists(state.user.id);
+                              await loadDashboardData(true);
+                              window.dispatchEvent(
+                                new CustomEvent("finance:data-updated", {
+                                  detail: {
+                                    entity: "recurring",
+                                    action: "delete",
+                                  },
+                                })
+                              );
+                            } catch (e) {
+                              showToast("Delete recurring failed", "error");
+                            }
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-              {recurring.length === 0 && (
-                <p className="text-gray-500 text-center py-4">
-                  No recurring transactions
-                </p>
-              )}
-            </div>
+                ))}
+                {recurring.length === 0 && (
+                  <div className="flex flex-col items-center py-4">
+                    <span className="text-3xl mb-2">🔁</span>
+                    <p className="text-gray-500 text-center">
+                      No recurring transactions
+                    </p>
+                    <Button
+                      className="mt-2"
+                      onClick={() => {
+                        setModalType("recurring");
+                        setModalMode("create");
+                        setSelectedItem(null);
+                        setModalOpen(true);
+                      }}
+                    >
+                      Add Recurring
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -630,56 +765,91 @@ const Dashboard = () => {
               Add Budget
             </button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {budgets.map((b, i) => (
-              <div key={i} className="p-4 rounded-md border">
-                <div className="flex justify-between">
-                  <span className="font-medium">{b.category}</span>
-                  <span className="text-gray-600">{b.month}</span>
+          {/* Section error boundary */}
+          {budgetsError ? (
+            <div className="text-center py-4">
+              <div className="text-red-600 mb-2">{budgetsError}</div>
+              <Button
+                onClick={() => loadUserLists(state.user.id)}
+                variant="primary"
+              >
+                Retry
+              </Button>
+            </div>
+          ) : budgetsLoading ? (
+            <div className="flex justify-center py-6">
+              <LoadingSpinner size="md" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {budgets.map((b, i) => (
+                <div key={i} className="p-4 rounded-md border">
+                  <div className="flex justify-between">
+                    <span className="font-medium">{b.category}</span>
+                    <span className="text-gray-600">{b.month}</span>
+                  </div>
+                  <p className="text-sm text-gray-700 mt-1">
+                    Budgeted: ${b.budgeted}
+                  </p>
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      className="text-xs px-2 py-1 rounded border"
+                      onClick={() => {
+                        setModalType("budget");
+                        setModalMode("edit");
+                        setSelectedItem(b);
+                        setModalOpen(true);
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className="text-xs px-2 py-1 rounded border text-red-600"
+                      onClick={async () => {
+                        try {
+                          if (!state.user?.id || !b?.id) return;
+                          await deleteBudgetAPI(state.user.id, b.id);
+                          await loadUserLists(state.user.id);
+                          await loadDashboardData(true);
+                          window.dispatchEvent(
+                            new CustomEvent("finance:data-updated", {
+                              detail: { entity: "budget", action: "delete" },
+                            })
+                          );
+                        } catch (e) {
+                          showToast("Delete budget failed", "error");
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
-                <p className="text-sm text-gray-700 mt-1">
-                  Budgeted: ${b.budgeted}
-                </p>
-                <div className="flex gap-2 mt-2">
-                  <button
-                    className="text-xs px-2 py-1 rounded border"
+              ))}
+              {budgets.length === 0 && (
+                <div className="flex flex-col items-center py-4">
+                  <span className="text-3xl mb-2">💸</span>
+                  <p className="text-gray-500 text-center">No budgets yet.</p>
+                  <Button
+                    className="mt-2"
                     onClick={() => {
                       setModalType("budget");
-                      setModalMode("edit");
-                      setSelectedItem(b);
+                      setModalMode("create");
+                      setSelectedItem(null);
                       setModalOpen(true);
                     }}
                   >
-                    Edit
-                  </button>
-                  <button
-                    className="text-xs px-2 py-1 rounded border text-red-600"
-                    onClick={async () => {
-                      try {
-                        if (!state.user?.id || !b?.id) return;
-                        await deleteBudgetAPI(state.user.id, b.id);
-                        await loadUserLists(state.user.id);
-                        await loadDashboardData(true);
-                        window.dispatchEvent(
-                          new CustomEvent("finance:data-updated", {
-                            detail: { entity: "budget", action: "delete" },
-                          })
-                        );
-                      } catch (e) {
-                        console.error("Delete budget failed", e);
-                      }
-                    }}
-                  >
-                    Delete
-                  </button>
+                    Add Budget
+                  </Button>
                 </div>
-              </div>
-            ))}
-            {budgets.length === 0 && (
-              <p className="text-gray-500">No budgets yet.</p>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
+      )}
+      {/* Toast notification */}
+      {toast && (
+        <Toast message={toast.message} type={toast.type} onClose={hideToast} />
       )}
 
       <DataEntryModal

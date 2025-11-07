@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useChatAPI } from "../../api/apis";
+import DOMPurify from "dompurify";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import "../../styles/ChatBot.css";
 
 export default function ChatBot() {
@@ -16,6 +19,7 @@ export default function ChatBot() {
   ]);
   const [inputMessage, setInputMessage] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(null);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -121,10 +125,170 @@ export default function ChatBot() {
     });
   };
 
+  // Copy code to clipboard
+  const copyToClipboard = (code, id) => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopiedCode(id);
+      setTimeout(() => setCopiedCode(null), 2000);
+    });
+  };
+
+  // Render message content with proper HTML sanitization and code highlighting
+  const renderMessageContent = (message) => {
+    if (!message.text) return null;
+
+    if (message.isHtml) {
+      // Sanitize HTML to prevent XSS attacks
+      const sanitizedHtml = DOMPurify.sanitize(message.text, {
+        ALLOWED_TAGS: [
+          "p",
+          "br",
+          "strong",
+          "em",
+          "u",
+          "h1",
+          "h2",
+          "h3",
+          "h4",
+          "h5",
+          "h6",
+          "ul",
+          "ol",
+          "li",
+          "a",
+          "code",
+          "pre",
+          "blockquote",
+          "span",
+          "div",
+        ],
+        ALLOWED_ATTR: ["href", "target", "rel", "class"],
+      });
+
+      // Check if contains code blocks
+      const codeBlockRegex = /<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/g;
+      const hasCodeBlocks = codeBlockRegex.test(sanitizedHtml);
+
+      if (hasCodeBlocks) {
+        // Parse and render code blocks with syntax highlighting
+        const parts = [];
+        let lastIndex = 0;
+        const regex = /<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/g;
+        let match;
+
+        while ((match = regex.exec(message.text)) !== null) {
+          // Add text before code block
+          if (match.index > lastIndex) {
+            const textBefore = message.text.substring(lastIndex, match.index);
+            parts.push(
+              <div
+                key={`text-${lastIndex}`}
+                dangerouslySetInnerHTML={{
+                  __html: DOMPurify.sanitize(textBefore),
+                }}
+              />
+            );
+          }
+
+          // Add code block with copy button
+          const code = match[1].replace(/<[^>]*>/g, ""); // Strip HTML tags from code
+          const codeId = `${message.id}-${match.index}`;
+          parts.push(
+            <div key={`code-${match.index}`} className="code-block-wrapper">
+              <div className="code-block-header">
+                <span className="code-label">Code</span>
+                <button
+                  className="copy-code-btn"
+                  onClick={() => copyToClipboard(code, codeId)}
+                  aria-label="Copy code to clipboard"
+                >
+                  {copiedCode === codeId ? (
+                    <>
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                      <span>Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                        />
+                      </svg>
+                      <span>Copy</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              <SyntaxHighlighter
+                language="javascript"
+                style={vscDarkPlus}
+                customStyle={{
+                  margin: 0,
+                  borderRadius: "0 0 8px 8px",
+                  fontSize: "13px",
+                }}
+              >
+                {code}
+              </SyntaxHighlighter>
+            </div>
+          );
+
+          lastIndex = match.index + match[0].length;
+        }
+
+        // Add remaining text after last code block
+        if (lastIndex < message.text.length) {
+          const textAfter = message.text.substring(lastIndex);
+          parts.push(
+            <div
+              key={`text-${lastIndex}`}
+              dangerouslySetInnerHTML={{
+                __html: DOMPurify.sanitize(textAfter),
+              }}
+            />
+          );
+        }
+
+        return <div className="html-content">{parts}</div>;
+      }
+
+      // No code blocks, just render sanitized HTML
+      return (
+        <div
+          className="html-content"
+          dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+        />
+      );
+    }
+
+    // Plain text message
+    return <p>{message.text}</p>;
+  };
+
   const quickActions = [
-    "How can I manage my budget?",
-    "Help me track transactions",
-    "Set up financial goals",
+    { text: "How can I manage my budget?", icon: "💰" },
+    { text: "Help me track transactions", icon: "📊" },
+    { text: "Set up financial goals", icon: "🎯" },
   ];
 
   return (
@@ -187,15 +351,7 @@ export default function ChatBot() {
                 }}
               >
                 <div className="message-content">
-                  {message.text &&
-                    (message.isHtml ? (
-                      <div
-                        className="html-content"
-                        dangerouslySetInnerHTML={{ __html: message.text }}
-                      />
-                    ) : (
-                      <p>{message.text}</p>
-                    ))}
+                  {renderMessageContent(message)}
                   {!isTyping && message.text && (
                     <span className="message-time">
                       {formatTime(message.timestamp)}
@@ -229,9 +385,11 @@ export default function ChatBot() {
               <button
                 key={index}
                 className="quick-action"
-                onClick={() => sendMessageText(action)}
+                onClick={() => sendMessageText(action.text)}
+                aria-label={action.text}
               >
-                {action}
+                <span className="quick-action-icon">{action.icon}</span>
+                <span className="quick-action-text">{action.text}</span>
               </button>
             ))}
           </div>
