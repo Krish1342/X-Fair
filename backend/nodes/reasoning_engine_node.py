@@ -4,6 +4,7 @@ Stage 2: Intermediate and Stage 3: Advanced
 """
 import logging
 from typing import Dict, Any, List
+from datetime import datetime
 from core.state import FinanceAgentState, SystemStage
 
 logger = logging.getLogger(__name__)
@@ -16,24 +17,37 @@ class ReasoningEngineNode:
         self.llm = llm
     
     def __call__(self, state: FinanceAgentState) -> FinanceAgentState:
-        """Apply reasoning and planning logic"""
+        """Apply reasoning and planning logic with fallback handling"""
         try:
             stage = state.get("system_stage", SystemStage.INTERMEDIATE)
+            analysis_results = state.get("analysis_results", {})
             
+            # Check if we have enough data to proceed
+            if not analysis_results:
+                logger.warning("No analysis results available - using fallback response")
+                state["analysis_results"]["reasoning_analysis"] = self._generate_fallback_response(state)
+                return state
+                
+            # Proceed with normal reasoning if we have data
             if stage == SystemStage.INTERMEDIATE:
                 reasoning_result = self._intermediate_reasoning(state)
             else:  # ADVANCED
                 reasoning_result = self._advanced_reasoning(state)
             
+            # Add recommendations based on financial health
+            health_score = reasoning_result.get("context_analysis", {}).get("financial_health_score", 0)
+            reasoning_result["health_based_recommendations"] = self._get_health_score_recommendations(health_score)
+            
             state["analysis_results"]["reasoning_analysis"] = reasoning_result
             state["tools_used"] = state.get("tools_used", []) + ["reasoning_engine"]
             state["current_node"] = "reasoning_engine"
             
-            logger.info(f"Reasoning engine completed for {stage} stage")
+            logger.info(f"Reasoning engine completed for {stage} stage with health score {health_score}")
             
         except Exception as e:
             logger.error(f"Reasoning engine error: {e}")
             state["error_message"] = str(e)
+            state["analysis_results"]["reasoning_analysis"] = self._generate_fallback_response(state)
         
         return state
     
@@ -86,22 +100,47 @@ class ReasoningEngineNode:
         }
     
     def _analyze_financial_context(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze the financial context from all available data"""
+        """Analyze the financial context from all available data with enhanced extraction"""
         context = {
             "financial_health_score": 0,
             "key_metrics": {},
             "risk_factors": [],
             "opportunities": [],
-            "data_completeness": 0
+            "data_completeness": 0,
+            "income_stability": "unknown",
+            "debt_status": "unknown",
+            "savings_rate": 0.0,
+            "investment_diversification": "unknown",
+            "emergency_fund_status": "unknown"
         }
         
-        # Analyze budget data
+        # Analyze budget data with enhanced metrics
         if "budget_analysis" in analysis_results:
             budget = analysis_results["budget_analysis"]
-            context["key_metrics"]["monthly_expenses"] = budget.get("total_expenses", 0)
-            context["key_metrics"]["expense_categories"] = len(budget.get("category_totals", {}))
             
-            # Calculate financial health indicators
+            # Core metrics
+            monthly_income = budget.get("total_income", 0)
+            monthly_expenses = budget.get("total_expenses", 0)
+            context["key_metrics"].update({
+                "monthly_income": monthly_income,
+                "monthly_expenses": monthly_expenses,
+                "expense_categories": len(budget.get("category_totals", {})),
+                "discretionary_spending": budget.get("discretionary_spending", 0),
+                "fixed_expenses": budget.get("fixed_expenses", 0)
+            })
+            
+            # Calculate savings rate and financial health indicators
+            if monthly_income > 0:
+                savings_rate = (monthly_income - monthly_expenses) / monthly_income * 100
+                context["savings_rate"] = round(savings_rate, 2)
+                
+                if savings_rate >= 20:
+                    context["financial_health_score"] += 25
+                    context["opportunities"].append("Strong savings rate")
+                elif savings_rate < 10:
+                    context["risk_factors"].append("Low savings rate")
+            
+            # Investment analysis
             investment_pct = budget.get("category_percentages", {}).get("Investment", 0)
             if investment_pct > 20:
                 context["financial_health_score"] += 30
@@ -341,3 +380,125 @@ class ReasoningEngineNode:
         }
         
         return optimization
+        
+    def _generate_fallback_response(self, state: FinanceAgentState) -> Dict[str, Any]:
+        """Generate a structured fallback response when analysis data is missing"""
+        user_query = state.get("user_query", "")
+        
+        return {
+            "reasoning_level": "basic",
+            "status": "fallback",
+            "timestamp": datetime.now().isoformat(),
+            "message": "Unable to provide detailed analysis due to insufficient data",
+            "context_analysis": {
+                "financial_health_score": 0,
+                "data_completeness": 0,
+                "missing_data": ["budget", "goals", "transactions"],
+                "required_actions": [
+                    "Complete financial profile",
+                    "Add monthly income and expenses",
+                    "Set financial goals"
+                ]
+            },
+            "basic_recommendations": [
+                {
+                    "type": "action",
+                    "priority": "high",
+                    "description": "Start by tracking your income and expenses",
+                    "reason": "This will help us provide personalized recommendations"
+                },
+                {
+                    "type": "information",
+                    "priority": "medium",
+                    "description": "Consider setting specific financial goals",
+                    "reason": "Goals help guide better financial decisions"
+                }
+            ],
+            "next_steps": {
+                "immediate": "Complete your financial profile",
+                "short_term": "Track expenses for at least one month",
+                "support": "Contact support if you need help getting started"
+            }
+        }
+    
+    def _get_health_score_recommendations(self, health_score: float) -> List[Dict[str, Any]]:
+        """Generate recommendations based on financial health score"""
+        recommendations = []
+        
+        # Critical recommendations (health score < 30)
+        if health_score < 30:
+            recommendations.extend([
+                {
+                    "priority": "critical",
+                    "category": "emergency_fund",
+                    "action": "Build emergency fund immediately",
+                    "target": "Save 3-6 months of expenses",
+                    "reasoning": "Your financial security is at risk without an emergency fund"
+                },
+                {
+                    "priority": "critical",
+                    "category": "expense_management",
+                    "action": "Review and cut non-essential expenses",
+                    "target": "Reduce expenses by 20-30%",
+                    "reasoning": "Your current spending patterns are unsustainable"
+                }
+            ])
+        
+        # Improvement recommendations (health score 30-60)
+        elif health_score < 60:
+            recommendations.extend([
+                {
+                    "priority": "high",
+                    "category": "savings",
+                    "action": "Increase savings rate",
+                    "target": "Save 15-20% of income",
+                    "reasoning": "Building stronger financial foundation"
+                },
+                {
+                    "priority": "high",
+                    "category": "debt_management",
+                    "action": "Create debt reduction plan",
+                    "target": "Pay off high-interest debt",
+                    "reasoning": "Debt is limiting your financial growth"
+                }
+            ])
+        
+        # Optimization recommendations (health score 60-80)
+        elif health_score < 80:
+            recommendations.extend([
+                {
+                    "priority": "medium",
+                    "category": "investment",
+                    "action": "Optimize investment strategy",
+                    "target": "Review and rebalance portfolio",
+                    "reasoning": "Ensure investments align with goals"
+                },
+                {
+                    "priority": "medium",
+                    "category": "tax_planning",
+                    "action": "Maximize tax advantages",
+                    "target": "Review tax-advantaged accounts",
+                    "reasoning": "Reduce tax burden and increase savings"
+                }
+            ])
+        
+        # Excellence recommendations (health score >= 80)
+        else:
+            recommendations.extend([
+                {
+                    "priority": "low",
+                    "category": "wealth_building",
+                    "action": "Consider advanced investment options",
+                    "target": "Explore diversification opportunities",
+                    "reasoning": "Ready for sophisticated strategies"
+                },
+                {
+                    "priority": "low",
+                    "category": "legacy_planning",
+                    "action": "Develop estate plan",
+                    "target": "Create or review estate documents",
+                    "reasoning": "Protect and transfer wealth efficiently"
+                }
+            ])
+        
+        return recommendations

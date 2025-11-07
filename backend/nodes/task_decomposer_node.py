@@ -3,8 +3,11 @@ Task Decomposer Node - Multi-step Plans
 Stage 3: Advanced - Task Decomposer
 """
 import logging
+import re
 from typing import Dict, Any, List
 from core.state import FinanceAgentState
+import json
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +17,7 @@ class TaskDecomposerNode:
     
     def __init__(self, llm):
         self.llm = llm
-    
+        
     def __call__(self, state: FinanceAgentState) -> FinanceAgentState:
         """Decompose complex financial tasks"""
         try:
@@ -24,21 +27,40 @@ class TaskDecomposerNode:
             # Identify task complexity and decompose
             task_analysis = self._analyze_task_complexity(user_query)
             decomposed_tasks = self._decompose_financial_task(user_query, task_analysis, analysis_results)
+            execution_plan = self._create_execution_plan(decomposed_tasks)
             
+            # Generate human-readable summary
+            human_readable_summary = self._generate_plan_summary(user_query, decomposed_tasks, execution_plan)
+            
+            # Create structured JSON response
             state["analysis_results"]["task_decomposition"] = {
+                "version": "1.0",
+                "timestamp": datetime.now().isoformat(),
+                "query": user_query,
                 "task_analysis": task_analysis,
-                "decomposed_tasks": decomposed_tasks,
-                "execution_plan": self._create_execution_plan(decomposed_tasks)
+                "plan": {
+                    "tasks": decomposed_tasks,
+                    "execution": execution_plan,
+                    "summary": human_readable_summary,
+                    "metadata": {
+                        "total_tasks": len(decomposed_tasks),
+                        "estimated_duration": self._calculate_total_duration(decomposed_tasks),
+                        "complexity_level": task_analysis["complexity_level"],
+                        "critical_tasks": len([t for t in decomposed_tasks if t.get("priority") == "Critical"]),
+                        "success_criteria": self._define_success_criteria(decomposed_tasks)
+                    }
+                }
             }
             
             state["tools_used"] = state.get("tools_used", []) + ["task_decomposer"]
             state["current_node"] = "task_decomposer"
             
-            logger.info(f"Decomposed task into {len(decomposed_tasks)} subtasks")
+            logger.info(f"Successfully decomposed task into {len(decomposed_tasks)} subtasks")
             
         except Exception as e:
             logger.error(f"Task decomposition error: {e}")
             state["error_message"] = str(e)
+            state["analysis_results"]["task_decomposition"] = self._generate_error_response(e, user_query)
         
         return state
     
@@ -442,7 +464,7 @@ class TaskDecomposerNode:
         sorted_tasks = sorted(subtasks, key=lambda x: priority_order.get(x["priority"], 5))
         
         # Calculate total estimated time
-        total_time = sum([self._parse_time_estimate(task["estimated_time"]) for task in subtasks])
+        total_time = self._calculate_total_duration(subtasks)
         
         # Create phases
         phases = {
@@ -451,38 +473,200 @@ class TaskDecomposerNode:
             "Phase 3 - Optimization": [task for task in sorted_tasks if task["priority"] in ["Medium", "Low"]]
         }
         
+        # Enhanced execution plan with more structured metadata
         return {
             "total_tasks": len(subtasks),
             "total_estimated_time_hours": total_time,
             "phases": phases,
             "critical_path": [task["task_id"] for task in sorted_tasks if task["priority"] == "Critical"],
-            "success_metrics": [
-                "All critical tasks completed",
-                "Key deliverables achieved",
-                "Timeline adherence"
-            ]
+            "timeline": self._generate_timeline(sorted_tasks),
+            "success_criteria": self._define_success_criteria(subtasks),
+            "risk_factors": self._identify_risk_factors(subtasks),
+            "dependencies": self._analyze_dependencies(sorted_tasks)
+        }
+    
+    def _generate_plan_summary(self, query: str, tasks: List[Dict[str, Any]], plan: Dict[str, Any]) -> str:
+        """Generate a human-readable summary of the financial plan"""
+        
+        summary_template = """
+Financial Plan Summary for: {query}
+
+Complexity Level: {complexity}
+Total Tasks: {total_tasks}
+Estimated Duration: {duration} hours
+
+Key Phases:
+{phases}
+
+Critical Tasks:
+{critical_tasks}
+
+Timeline Overview:
+{timeline}
+
+Success Criteria:
+{success_criteria}
+
+Risk Factors to Consider:
+{risks}
+"""
+        # Format phases
+        phase_summary = []
+        for phase_name, phase_tasks in plan["phases"].items():
+            if phase_tasks:
+                phase_summary.append(f"• {phase_name}: {len(phase_tasks)} tasks")
+        
+        # Format critical tasks
+        critical_tasks = [task for task in tasks if task.get("priority") == "Critical"]
+        critical_summary = "\n".join([f"• {task['title']}" for task in critical_tasks]) if critical_tasks else "No critical tasks identified"
+        
+        return summary_template.format(
+            query=query,
+            complexity=plan.get("complexity_level", "Medium"),
+            total_tasks=plan["total_tasks"],
+            duration=round(plan["total_estimated_time_hours"], 1),
+            phases="\n".join(phase_summary),
+            critical_tasks=critical_summary,
+            timeline="\n".join([f"• {item}" for item in plan["timeline"]]),
+            success_criteria="\n".join([f"• {item}" for item in plan["success_criteria"]]),
+            risks="\n".join([f"• {item}" for item in plan["risk_factors"]])
+        )
+    
+    def _calculate_total_duration(self, tasks: List[Dict[str, Any]]) -> float:
+        """Calculate total duration in hours from task list"""
+        return sum(self._parse_time_estimate(task.get("estimated_time", "1 hour")) for task in tasks)
+    
+    def _define_success_criteria(self, tasks: List[Dict[str, Any]]) -> List[str]:
+        """Define clear success criteria based on tasks"""
+        criteria = [
+            "All critical tasks completed successfully",
+            f"Minimum {len([t for t in tasks if t.get('priority') in ['Critical', 'High']])} high-priority tasks completed",
+            "Key deliverables produced and verified",
+            "No blocking issues remaining"
+        ]
+        
+        # Add task-specific criteria
+        for task in tasks:
+            if task.get("deliverables"):
+                for deliverable in task["deliverables"]:
+                    criteria.append(f"Completed: {deliverable}")
+        
+        return list(set(criteria))  # Remove duplicates
+    
+    def _generate_timeline(self, tasks: List[Dict[str, Any]]) -> List[str]:
+        """Generate a timeline of major milestones"""
+        timeline = []
+        current_week = 1
+        current_phase = None
+        
+        for task in tasks:
+            task_time = self._parse_time_estimate(task.get("estimated_time", "1 hour"))
+            if task_time >= 8:  # Only include significant milestones (1+ day)
+                timeline.append(f"Week {current_week}: {task['title']}")
+                if task_time > 40:  # More than a week
+                    current_week += int(task_time / 40)
+            
+            if task.get("priority") != current_phase:
+                current_phase = task.get("priority")
+                if current_phase:
+                    timeline.append(f"Begin {current_phase} priority tasks")
+        
+        return timeline
+    
+    def _identify_risk_factors(self, tasks: List[Dict[str, Any]]) -> List[str]:
+        """Identify potential risk factors in the plan"""
+        risks = [
+            "Market volatility and economic changes",
+            "Changes in personal financial situation",
+            "External dependencies and delays"
+        ]
+        
+        # Add task-specific risks
+        for task in tasks:
+            if task.get("priority") == "Critical":
+                risks.append(f"Failure to complete: {task['title']}")
+            if task.get("dependencies"):
+                risks.append(f"Dependency chain delays for: {task['title']}")
+        
+        return list(set(risks))  # Remove duplicates
+    
+    def _analyze_dependencies(self, tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Analyze task dependencies and create dependency map"""
+        dependency_map = []
+        for task in tasks:
+            if task.get("dependencies"):
+                dependency_map.append({
+                    "task_id": task["task_id"],
+                    "title": task["title"],
+                    "depends_on": task["dependencies"],
+                    "estimated_start": self._calculate_earliest_start(task, tasks)
+                })
+        return dependency_map
+    
+    def _calculate_earliest_start(self, task: Dict[str, Any], all_tasks: List[Dict[str, Any]]) -> str:
+        """Calculate earliest possible start time for a task based on dependencies"""
+        if not task.get("dependencies"):
+            return "Immediately"
+            
+        dependent_tasks = [t for t in all_tasks if t["task_id"] in task["dependencies"]]
+        if not dependent_tasks:
+            return "After prerequisite completion"
+            
+        total_prereq_time = sum(self._parse_time_estimate(t.get("estimated_time", "1 hour")) 
+                               for t in dependent_tasks)
+        
+        if total_prereq_time < 8:
+            return f"After {round(total_prereq_time, 1)} hours"
+        elif total_prereq_time < 40:
+            return f"After {round(total_prereq_time/8, 1)} days"
+        else:
+            return f"After {round(total_prereq_time/40, 1)} weeks"
+    
+    def _generate_error_response(self, error: Exception, query: str) -> Dict[str, Any]:
+        """Generate a structured error response with fallback suggestions"""
+        return {
+            "status": "error",
+            "error_message": str(error),
+            "timestamp": datetime.now().isoformat(),
+            "fallback_suggestions": {
+                "message": "Unable to create detailed plan. Consider breaking down your request:",
+                "alternative_queries": [
+                    f"What's the first step to {query.lower()}?",
+                    "Can you explain the basic requirements?",
+                    "What are the key components to consider?"
+                ],
+                "simplified_approach": [
+                    "Start with a smaller scope",
+                    "Focus on immediate next actions",
+                    "Consult with a financial advisor"
+                ]
+            }
         }
     
     def _parse_time_estimate(self, time_str: str) -> float:
         """Parse time estimate string to hours"""
         try:
-            if "hour" in time_str:
-                # Extract number from strings like "1-2 hours", "30 minutes"
-                import re
-                numbers = re.findall(r'\d+', time_str)
-                if numbers:
-                    if "minute" in time_str:
-                        return float(numbers[0]) / 60
-                    else:
-                        return float(numbers[0])
+            time_str = str(time_str).lower()
+            numbers = re.findall(r'\d+', time_str)
+            
+            if not numbers:
+                return 1.0  # Default to 1 hour if no numbers found
+                
+            value = float(numbers[0])
+            
+            if "minute" in time_str:
+                return value / 60
+            elif "hour" in time_str:
+                return value
+            elif "day" in time_str:
+                return value * 8  # 8 hours per day
             elif "week" in time_str:
-                numbers = re.findall(r'\d+', time_str)
-                if numbers:
-                    return float(numbers[0]) * 40  # 40 hours per week
+                return value * 40  # 40 hours per week
             elif "month" in time_str:
-                numbers = re.findall(r'\d+', time_str)
-                if numbers:
-                    return float(numbers[0]) * 160  # 160 hours per month
-            return 1.0  # Default
-        except:
-            return 1.0
+                return value * 160  # 160 hours per month
+            
+            return value  # Default to treating number as hours
+            
+        except Exception as e:
+            logger.warning(f"Error parsing time estimate '{time_str}': {e}")
+            return 1.0  # Default to 1 hour on error
