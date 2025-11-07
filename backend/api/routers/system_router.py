@@ -8,6 +8,7 @@ from core.groq_client import groq_client
 
 router = APIRouter()
 
+
 @router.get("/health")
 async def health_check():
     groq_status = "healthy" if groq_client.api_key else "missing_api_key"
@@ -17,167 +18,288 @@ async def health_check():
         "groq_integration": groq_status,
     }
 
+
 @router.get("/dashboard")
-async def get_dashboard(user_id: int, timeframe: str = "30d", db: Session = Depends(get_db)):
-    # Validate user
-    user = db.query(dbm.User).filter(dbm.User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+async def get_dashboard(
+    user_id: int, timeframe: str = "30d", db: Session = Depends(get_db)
+):
+    """
+    Get comprehensive dashboard data for a user with robust error handling.
+    Returns default values when no data exists to prevent frontend crashes.
+    """
+    try:
+        # Validate user
+        user = db.query(dbm.User).filter(dbm.User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
 
-    # Determine date window
-    today = date.today()
-    tf_map = {"7d": 7, "30d": 30, "90d": 90, "1y": 365}
-    days = tf_map.get(timeframe.lower(), 30)
-    start_date = today - timedelta(days=days)
+        # Determine date window
+        today = date.today()
+        tf_map = {"7d": 7, "30d": 30, "90d": 90, "1y": 365}
+        days = tf_map.get(timeframe.lower(), 30)
+        start_date = today - timedelta(days=days)
 
-    # Transactions within window
-    tx_q = (
-        db.query(dbm.Transaction)
-        .filter(dbm.Transaction.user_id == user_id, dbm.Transaction.date >= start_date, dbm.Transaction.date <= today)
-    )
-    txs = tx_q.all()
+        # Transactions within window with error handling
+        try:
+            tx_q = db.query(dbm.Transaction).filter(
+                dbm.Transaction.user_id == user_id,
+                dbm.Transaction.date >= start_date,
+                dbm.Transaction.date <= today,
+            )
+            txs = tx_q.all()
+        except Exception as e:
+            print(f"Error fetching transactions: {e}")
+            txs = []
 
-    income = sum(t.amount for t in txs if t.amount > 0)
-    expenses = sum(-t.amount for t in txs if t.amount < 0)
-    savings_rate = round(((income - expenses) / income) * 100, 2) if income > 0 else 0.0
+        # Safe calculation with default values
+        income = sum(t.amount for t in txs if t.amount > 0) if txs else 0.0
+        expenses = sum(-t.amount for t in txs if t.amount < 0) if txs else 0.0
+        savings_rate = (
+            round(((income - expenses) / income) * 100, 2) if income > 0 else 0.0
+        )
 
-    # Account balance = net of all transactions to date
-    all_net = (
-        db.query(dbm.Transaction)
-        .filter(dbm.Transaction.user_id == user_id)
-        .all()
-    )
-    account_balance = round(sum(t.amount for t in all_net), 2)
+        # Account balance = net of all transactions to date
+        try:
+            all_net = (
+                db.query(dbm.Transaction)
+                .filter(dbm.Transaction.user_id == user_id)
+                .all()
+            )
+            account_balance = (
+                round(sum(t.amount for t in all_net), 2) if all_net else 0.0
+            )
+        except Exception as e:
+            print(f"Error calculating account balance: {e}")
+            account_balance = 0.0
 
-    # Budgets for current month and spend by category
-    month_key = f"{today.year}-{today.month:02d}"
-    budgets = db.query(dbm.Budget).filter(dbm.Budget.user_id == user_id, dbm.Budget.month == month_key).all()
-    spent_by_cat = defaultdict(float)
-    month_start = date(today.year, today.month, 1)
-    month_txs = (
-        db.query(dbm.Transaction)
-        .filter(dbm.Transaction.user_id == user_id, dbm.Transaction.date >= month_start, dbm.Transaction.date <= today)
-        .all()
-    )
-    for t in month_txs:
-        if t.amount < 0:
-            spent_by_cat[t.category or "Uncategorized"] += -t.amount
-    budget_categories = []
-    for b in budgets:
-        spent = round(spent_by_cat.get(b.category, 0.0), 2)
-        pct = round((spent / b.budgeted) * 100, 2) if b.budgeted else 0.0
-        budget_categories.append({"name": b.category, "budgeted": b.budgeted, "spent": spent, "percentage": pct})
+        # Budgets for current month and spend by category with error handling
+        month_key = f"{today.year}-{today.month:02d}"
+        try:
+            budgets = (
+                db.query(dbm.Budget)
+                .filter(dbm.Budget.user_id == user_id, dbm.Budget.month == month_key)
+                .all()
+            )
+        except Exception as e:
+            print(f"Error fetching budgets: {e}")
+            budgets = []
 
-    # Recent transactions (last 5)
-    recent = (
-        db.query(dbm.Transaction)
-        .filter(dbm.Transaction.user_id == user_id)
-        .order_by(dbm.Transaction.date.desc(), dbm.Transaction.id.desc())
-        .limit(5)
-        .all()
-    )
-    recent_transactions = [
-        {"id": t.id, "description": t.description, "amount": t.amount, "date": t.date.isoformat(), "category": t.category}
-        for t in recent
-    ]
+        spent_by_cat = defaultdict(float)
+        month_start = date(today.year, today.month, 1)
 
-    # Goals
-    goals = (
-        db.query(dbm.Goal)
-        .filter(dbm.Goal.user_id == user_id)
-        .order_by(dbm.Goal.deadline.is_(None), dbm.Goal.deadline.asc())
-        .all()
-    )
-    goals_out = [
-        {
-            "id": g.id,
-            "name": g.name,
-            "target": g.target,
-            "current": g.current or 0.0,
-            "deadline": g.deadline.isoformat() if g.deadline else None,
+        try:
+            month_txs = (
+                db.query(dbm.Transaction)
+                .filter(
+                    dbm.Transaction.user_id == user_id,
+                    dbm.Transaction.date >= month_start,
+                    dbm.Transaction.date <= today,
+                )
+                .all()
+            )
+            for t in month_txs:
+                if t.amount < 0:
+                    spent_by_cat[t.category or "Uncategorized"] += -t.amount
+        except Exception as e:
+            print(f"Error calculating spending by category: {e}")
+            month_txs = []
+
+        budget_categories = []
+        for b in budgets:
+            spent = round(spent_by_cat.get(b.category, 0.0), 2)
+            pct = (
+                round((spent / b.budgeted) * 100, 2)
+                if b.budgeted and b.budgeted > 0
+                else 0.0
+            )
+            budget_categories.append(
+                {
+                    "name": b.category,
+                    "budgeted": b.budgeted,
+                    "spent": spent,
+                    "percentage": pct,
+                }
+            )
+
+        # Recent transactions (last 5) with error handling
+        try:
+            recent = (
+                db.query(dbm.Transaction)
+                .filter(dbm.Transaction.user_id == user_id)
+                .order_by(dbm.Transaction.date.desc(), dbm.Transaction.id.desc())
+                .limit(5)
+                .all()
+            )
+            recent_transactions = [
+                {
+                    "id": t.id,
+                    "description": t.description,
+                    "amount": t.amount,
+                    "date": t.date.isoformat(),
+                    "category": t.category or "Uncategorized",
+                }
+                for t in recent
+            ]
+        except Exception as e:
+            print(f"Error fetching recent transactions: {e}")
+            recent_transactions = []
+
+        # Goals with error handling
+        try:
+            goals = (
+                db.query(dbm.Goal)
+                .filter(dbm.Goal.user_id == user_id)
+                .order_by(dbm.Goal.deadline.is_(None), dbm.Goal.deadline.asc())
+                .all()
+            )
+            goals_out = [
+                {
+                    "id": g.id,
+                    "name": g.name,
+                    "target": g.target,
+                    "current": g.current or 0.0,
+                    "deadline": g.deadline.isoformat() if g.deadline else None,
+                }
+                for g in goals
+            ]
+        except Exception as e:
+            print(f"Error fetching goals: {e}")
+            goals_out = []
+
+        # User-tailored insights + actionable suggestions
+        insights = []
+        suggestions = []
+
+        # Overspending alerts with concrete suggestion
+        for b in budget_categories:
+            if b["budgeted"] and b["spent"] > b["budgeted"]:
+                over_pct = round(
+                    ((b["spent"] - b["budgeted"]) / b["budgeted"]) * 100, 1
+                )
+                insights.append(
+                    {
+                        "title": f"{b['name']} over budget",
+                        "description": f"You've spent ${b['spent']:.2f} against a ${b['budgeted']:.2f} budget ({over_pct}% over).",
+                        "type": "warning",
+                        "category": b["name"],
+                    }
+                )
+                # Suggest: increase this month's budget slightly or set next month's budget proactively
+                # Provide complete params so the execute API can succeed immediately
+                increased_amount = round(b["budgeted"] * 1.1, 2)
+                suggestions.append(
+                    {
+                        "label": f"Increase {b['name']} budget by 10% for {month_key}",
+                        "action": "update_budget",
+                        "params": {
+                            "category": b["name"],
+                            "month": month_key,
+                            "budgeted": increased_amount,
+                        },
+                        "explain": "You overspent in this category; temporarily increasing budget can avoid constant overages while you adjust habits.",
+                    }
+                )
+
+        # If a category has zero budget but has spending, propose adding a budget
+        spent_nonbudget = [
+            cat
+            for cat, amt in spent_by_cat.items()
+            if amt > 0 and not any(b["name"] == cat for b in budget_categories)
+        ]
+        for cat in spent_nonbudget[:3]:
+            amt = round(spent_by_cat[cat], 2)
+            base_budget = max(50.0, round(amt * 1.1, 2))
+            insights.append(
+                {
+                    "title": f"No budget set for {cat}",
+                    "description": f"You've spent ${amt:.2f} this month in {cat} without a budget.",
+                    "type": "tip",
+                    "category": cat,
+                }
+            )
+            suggestions.append(
+                {
+                    "label": f"Create {cat} budget ${base_budget} for {month_key}",
+                    "action": "add_budget",
+                    "params": {
+                        "category": cat,
+                        "budgeted": base_budget,
+                        "month": month_key,
+                    },
+                    "explain": "Setting a small starter budget helps track and control this spend category.",
+                }
+            )
+
+        # Savings rate suggestion: if below 20% and income>0, propose a small recurring transfer
+        if income > 0 and savings_rate < 20:
+            suggested_amount = round(0.05 * income, 2)  # 5% of monthly income
+            insights.append(
+                {
+                    "title": "Improve savings rate",
+                    "description": f"Your savings rate is {savings_rate}%. Automating a ${suggested_amount:.2f}/mo transfer can help.",
+                    "type": "tip",
+                }
+            )
+            suggestions.append(
+                {
+                    "label": f"Create recurring Savings transfer ${suggested_amount}/mo",
+                    "action": "add_recurring",
+                    "params": {
+                        "description": "Auto-transfer to savings",
+                        "amount": -suggested_amount,
+                        "category": "Savings",
+                        "start_date": today.isoformat(),
+                        "frequency": "monthly",
+                        "interval": 1,
+                    },
+                    "explain": "Automated savings make it easier to hit your goals without manual effort.",
+                }
+            )
+
+        return {
+            "accountBalance": account_balance,
+            "monthlyIncome": round(income, 2),
+            "monthlyExpenses": round(expenses, 2),
+            "savingsRate": savings_rate,
+            "budgetCategories": budget_categories,
+            "recentTransactions": recent_transactions,
+            "goals": goals_out,
+            "insights": insights,
+            "suggestions": suggestions,
         }
-        for g in goals
-    ]
 
-    # User-tailored insights + actionable suggestions
-    insights = []
-    suggestions = []
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Log unexpected errors and return safe defaults
+        print(f"Dashboard error for user {user_id}: {e}")
+        import traceback
 
-    # Overspending alerts with concrete suggestion
-    for b in budget_categories:
-        if b["budgeted"] and b["spent"] > b["budgeted"]:
-            over_pct = round(((b["spent"] - b["budgeted"]) / b["budgeted"]) * 100, 1)
-            insights.append({
-                "title": f"{b['name']} over budget",
-                "description": f"You've spent ${b['spent']:.2f} against a ${b['budgeted']:.2f} budget ({over_pct}% over).",
-                "type": "warning",
-                "category": b["name"],
-            })
-            # Suggest: increase this month's budget slightly or set next month's budget proactively
-            # Provide complete params so the execute API can succeed immediately
-            increased_amount = round(b["budgeted"] * 1.1, 2)
-            suggestions.append({
-                "label": f"Increase {b['name']} budget by 10% for {month_key}",
-                "action": "update_budget",
-                "params": {
-                    "category": b["name"],
-                    "month": month_key,
-                    "budgeted": increased_amount,
-                },
-                "explain": "You overspent in this category; temporarily increasing budget can avoid constant overages while you adjust habits.",
-            })
+        traceback.print_exc()
 
-    # If a category has zero budget but has spending, propose adding a budget
-    spent_nonbudget = [
-        cat for cat, amt in spent_by_cat.items()
-        if amt > 0 and not any(b["name"] == cat for b in budget_categories)
-    ]
-    for cat in spent_nonbudget[:3]:
-        amt = round(spent_by_cat[cat], 2)
-        base_budget = max(50.0, round(amt * 1.1, 2))
-        insights.append({
-            "title": f"No budget set for {cat}",
-            "description": f"You've spent ${amt:.2f} this month in {cat} without a budget.",
-            "type": "tip",
-            "category": cat,
-        })
-        suggestions.append({
-            "label": f"Create {cat} budget ${base_budget} for {month_key}",
-            "action": "add_budget",
-            "params": {"category": cat, "budgeted": base_budget, "month": month_key},
-            "explain": "Setting a small starter budget helps track and control this spend category.",
-        })
-
-    # Savings rate suggestion: if below 20% and income>0, propose a small recurring transfer
-    if income > 0 and savings_rate < 20:
-        suggested_amount = round(0.05 * income, 2)  # 5% of monthly income
-        insights.append({
-            "title": "Improve savings rate",
-            "description": f"Your savings rate is {savings_rate}%. Automating a ${suggested_amount:.2f}/mo transfer can help.",
-            "type": "tip",
-        })
-        suggestions.append({
-            "label": f"Create recurring Savings transfer ${suggested_amount}/mo",
-            "action": "add_recurring",
-            "params": {
-                "description": "Auto-transfer to savings",
-                "amount": -suggested_amount,
-                "category": "Savings",
-                "start_date": today.isoformat(),
-                "frequency": "monthly",
-                "interval": 1,
-            },
-            "explain": "Automated savings make it easier to hit your goals without manual effort.",
-        })
-
-    return {
-        "accountBalance": account_balance,
-        "monthlyIncome": round(income, 2),
-        "monthlyExpenses": round(expenses, 2),
-        "savingsRate": savings_rate,
-        "budgetCategories": budget_categories,
-        "recentTransactions": recent_transactions,
-        "goals": goals_out,
-        "insights": insights,
-        "suggestions": suggestions,
-    }
+        # Return safe default values to prevent frontend crash
+        return {
+            "accountBalance": 0.0,
+            "monthlyIncome": 0.0,
+            "monthlyExpenses": 0.0,
+            "savingsRate": 0.0,
+            "budgetCategories": [],
+            "recentTransactions": [],
+            "goals": [],
+            "insights": [
+                {
+                    "title": "Welcome to X-Fair",
+                    "description": "Start by adding your first transaction or setting up a budget to see personalized insights here.",
+                    "type": "tip",
+                }
+            ],
+            "suggestions": [
+                {
+                    "label": "Add your first transaction",
+                    "action": "add_transaction",
+                    "params": {},
+                    "explain": "Begin tracking your finances by recording transactions.",
+                }
+            ],
+        }

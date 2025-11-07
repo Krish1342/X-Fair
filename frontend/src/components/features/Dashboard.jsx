@@ -17,6 +17,8 @@ import {
   generateRecurringAPI,
 } from "@api/finance";
 import DataEntryModal from "@components/DataEntryModal";
+import BulkUpload from "@components/features/BulkUpload";
+import UPIIntegration from "@components/features/UPIIntegration";
 import LoadingSpinner from "@ui/LoadingSpinner";
 import Button from "@ui/Button";
 import { cn } from "@utils";
@@ -36,6 +38,8 @@ const Dashboard = () => {
   const [modalType, setModalType] = useState("transaction");
   const [modalMode, setModalMode] = useState("create");
   const [selectedItem, setSelectedItem] = useState(null);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [showUPIUpload, setShowUPIUpload] = useState(false);
 
   useEffect(() => {
     loadDashboardData();
@@ -208,14 +212,54 @@ const Dashboard = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        
-      </div>
+      <div></div>
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">
             Financial Dashboard
           </h1>
+          {state.user && (
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={() => setShowUPIUpload(true)}
+                className="text-xs px-3 py-1.5 rounded-md bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 flex items-center gap-1"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 4v16m8-8H4"
+                  />
+                </svg>
+                Add UPI
+              </button>
+              <button
+                onClick={() => setShowBulkUpload(true)}
+                className="text-xs px-3 py-1.5 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 flex items-center gap-1"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                  />
+                </svg>
+                Bulk Upload
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex space-x-2">
@@ -288,9 +332,7 @@ const Dashboard = () => {
                 </p>
               )}
             </div>
-            <div>
-              
-            </div>
+            <div></div>
           </div>
         )}
 
@@ -653,6 +695,32 @@ const Dashboard = () => {
         userId={state.user?.id}
         mode={modalMode}
         initialItem={selectedItem}
+      />
+
+      {/* Bulk Upload Modal */}
+      <BulkUpload
+        isOpen={showBulkUpload}
+        onClose={() => setShowBulkUpload(false)}
+        userId={state.user?.id}
+        onSuccess={() => {
+          if (state.user?.id) {
+            loadUserLists(state.user.id);
+            loadDashboardData(true);
+          }
+        }}
+      />
+
+      {/* UPI Upload Modal */}
+      <UPIIntegration
+        isOpen={showUPIUpload}
+        onClose={() => setShowUPIUpload(false)}
+        userId={state.user?.id}
+        onSuccess={() => {
+          if (state.user?.id) {
+            loadUserLists(state.user.id);
+            loadDashboardData(true);
+          }
+        }}
       />
     </div>
   );
