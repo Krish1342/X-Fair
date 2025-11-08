@@ -40,6 +40,8 @@ matplotlib>=3.7.0
 
 # File handling
 openpyxl>=3.1.0
+pdfplumber>=0.10.0
+PyPDF2>=3.0.0
 
 # Security and authentication
 python-jose[cryptography]>=3.3.0

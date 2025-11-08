@@ -20,8 +20,8 @@ load_dotenv()
 
 router = APIRouter()
 
-# Initialize Groq client
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+# Initialize Groq client - Use the shared groq_client from core module
+from core.groq_client import groq_client
 
 
 # Define state for LangGraph

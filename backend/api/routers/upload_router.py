@@ -10,6 +10,8 @@ from typing import List, Dict, Any
 import csv
 import io
 import pandas as pd
+import pdfplumber
+import re
 
 from db.database import get_db
 from db import models as dbm
@@ -198,14 +200,87 @@ def validate_transaction_row(row: Dict[str, Any], row_num: int) -> Dict[str, Any
     }
 
 
+def extract_transactions_from_pdf(content: bytes) -> List[Dict[str, Any]]:
+    """
+    Extract transactions from bank statement PDF.
+    Supports common Indian bank statement formats.
+    """
+    transactions = []
+    
+    try:
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            all_text = ""
+            for page in pdf.pages:
+                all_text += page.extract_text() + "\n"
+            
+            # Common patterns for bank statements
+            # Pattern for: Date | Description | Debit | Credit | Balance
+            # Example: 01/01/2024  Payment to Merchant  500.00  -  10000.00
+            patterns = [
+                # SBI, HDFC pattern
+                r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\s+([A-Za-z0-9\s\-\.]+?)\s+(\d+(?:,\d+)*(?:\.\d{2})?)\s+(?:-|0\.00)?\s+(?:\d+(?:,\d+)*(?:\.\d{2})?)',
+                # ICICI pattern
+                r'(\d{1,2}\s[A-Z][a-z]{2}\s\d{4})\s+([A-Za-z0-9\s\-\.]+?)\s+(?:Dr|Cr)\s+(\d+(?:,\d+)*(?:\.\d{2})?)',
+            ]
+            
+            for pattern in patterns:
+                matches = re.finditer(pattern, all_text, re.MULTILINE)
+                for match in matches:
+                    date_str, description, amount_str = match.groups()[:3]
+                    
+                    # Parse date
+                    for fmt in ["%d/%m/%Y", "%d-%m-%Y", "%d %b %Y"]:
+                        try:
+                            date_obj = datetime.strptime(date_str.strip(), fmt).date()
+                            break
+                        except ValueError:
+                            continue
+                    else:
+                        date_obj = datetime.now().date()
+                    
+                    # Parse amount
+                    amount = float(amount_str.replace(',', ''))
+                    
+                    # Determine if debit or credit based on keywords
+                    desc_lower = description.lower()
+                    if any(word in desc_lower for word in ['payment', 'purchase', 'atm', 'withdrawal']):
+                        amount = -abs(amount)
+                    
+                    transactions.append({
+                        'date': date_obj.isoformat(),
+                        'description': description.strip(),
+                        'amount': amount
+                    })
+            
+            if not transactions:
+                # Fallback: Try simpler extraction
+                lines = all_text.split('\n')
+                for line in lines:
+                    # Look for lines with amounts
+                    amount_matches = re.findall(r'(\d+(?:,\d+)*(?:\.\d{2}))', line)
+                    date_matches = re.findall(r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})', line)
+                    
+                    if amount_matches and date_matches:
+                        transactions.append({
+                            'date': date_matches[0],
+                            'description': re.sub(r'\d+(?:,\d+)*(?:\.\d{2})?', '', line).strip()[:100],
+                            'amount': float(amount_matches[0].replace(',', ''))
+                        })
+    
+    except Exception as e:
+        raise ValueError(f"Failed to parse PDF: {str(e)}")
+    
+    return transactions
+
+
 @router.post("/upload/transactions/{user_id}")
 async def upload_transactions(
     user_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)
 ):
     """
-    Bulk upload transactions from CSV or Excel file.
+    Bulk upload transactions from CSV, Excel, or PDF file.
 
-    Expected columns:
+    Expected columns for CSV/Excel:
     - description (required): Transaction description
     - amount (required): Transaction amount (positive for income, negative for expenses)
     - date (optional): Transaction date in YYYY-MM-DD, DD/MM/YYYY, or MM/DD/YYYY format
@@ -213,6 +288,8 @@ async def upload_transactions(
     - merchant (optional): Merchant/payee name
     - account_type (optional): Account type
     - transaction_type (optional): "expense", "income", "debit", or "credit"
+
+    For PDF: Automatically extracts transactions from bank statement format.
 
     Returns:
     - Summary of uploaded transactions with success/failure counts
@@ -226,10 +303,11 @@ async def upload_transactions(
         filename.endswith(".csv")
         or filename.endswith(".xlsx")
         or filename.endswith(".xls")
+        or filename.endswith(".pdf")
     ):
         raise HTTPException(
             status_code=400,
-            detail="Invalid file format. Please upload a CSV or Excel (.xlsx, .xls) file",
+            detail="Invalid file format. Please upload a CSV, Excel (.xlsx, .xls), or PDF file",
         )
 
     try:
@@ -242,6 +320,10 @@ async def upload_transactions(
             text_content = content.decode("utf-8-sig")  # Handle BOM
             csv_reader = csv.DictReader(io.StringIO(text_content))
             rows = list(csv_reader)
+        elif filename.endswith(".pdf"):
+            # Parse PDF bank statement
+            pdf_transactions = extract_transactions_from_pdf(content)
+            rows = pdf_transactions
         else:
             # Parse Excel
             df = pd.read_excel(io.BytesIO(content))

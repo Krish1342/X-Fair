@@ -19,6 +19,7 @@ import WorkflowPage from "@pages/WorkflowPage";
 import { verifyTokenAPI } from "@api/finance";
 import AIPage from "@pages/AIPage";
 import TransactionsPage from "@pages/TransactionsPage";
+import PortfolioPage from "@pages/PortfolioPage";
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -146,6 +147,15 @@ const AppContent = () => {
             element={
               <ProtectedRoute>
                 <TransactionsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/portfolio"
+            element={
+              <ProtectedRoute>
+                <PortfolioPage />
               </ProtectedRoute>
             }
           />

@@ -78,6 +78,32 @@ const Header = () => {
 
               {isAuthenticated && (
                 <Link
+                  to="/transactions"
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive("/transactions")
+                      ? "text-blue-600 bg-blue-50"
+                      : "text-gray-700 hover:text-blue-600 hover:bg-gray-50"
+                  }`}
+                >
+                  Transactions
+                </Link>
+              )}
+
+              {isAuthenticated && (
+                <Link
+                  to="/portfolio"
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive("/portfolio")
+                      ? "text-blue-600 bg-blue-50"
+                      : "text-gray-700 hover:text-blue-600 hover:bg-gray-50"
+                  }`}
+                >
+                  Portfolio
+                </Link>
+              )}
+
+              {isAuthenticated && (
+                <Link
                   to="/ai"
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     isActive("/ai")

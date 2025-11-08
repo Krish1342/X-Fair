@@ -11,12 +11,11 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 export const uploadTransactionsFile = async (file, userId) => {
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("user_id", userId);
 
   const token = window.localStorage?.getItem("finance_token");
 
   const response = await axios.post(
-    `${API_BASE}/upload/transactions`,
+    `${API_BASE}/upload/transactions/${userId}`,
     formData,
     {
       headers: {
@@ -38,15 +37,15 @@ export const uploadTransactionsFile = async (file, userId) => {
 export const parseUPIMessage = async (message, userId) => {
   const token = window.localStorage?.getItem("finance_token");
 
+  const formData = new FormData();
+  formData.append("message", message);
+
   const response = await axios.post(
-    `${API_BASE}/upload/upi-message`,
-    {
-      message,
-      user_id: userId,
-    },
+    `${API_BASE}/upload/upi-message/${userId}`,
+    formData,
     {
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": "multipart/form-data",
         Authorization: token ? `Bearer ${token}` : "",
       },
     }

@@ -8,10 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import logging
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from .env file in the backend directory
+env_path = Path(__file__).parent / '.env'
+load_dotenv(dotenv_path=env_path)
 
 # External integrations and DB boot
 from core.groq_client import groq_client
@@ -27,6 +29,7 @@ from api.routers.recurring_router import router as recurring_router
 from api.routers.workflow_router import router as workflow_router
 from api.routers.system_router import router as system_router
 from api.routers.upload_router import router as upload_router
+from api.routers.portfolio_router import router as portfolio_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -73,6 +76,7 @@ app.include_router(goals_router, prefix="/api/v1")
 app.include_router(budgets_router, prefix="/api/v1")
 app.include_router(recurring_router, prefix="/api/v1")
 app.include_router(upload_router, prefix="/api/v1", tags=["upload"])
+app.include_router(portfolio_router, prefix="/api/v1", tags=["portfolio"])
 
 
 @app.get("/")

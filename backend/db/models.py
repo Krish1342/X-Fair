@@ -22,6 +22,8 @@ class User(Base):
     goals = relationship("Goal", back_populates="user", cascade="all, delete-orphan")
     budgets = relationship("Budget", back_populates="user", cascade="all, delete-orphan")
     recurring = relationship("RecurringTransaction", back_populates="user", cascade="all, delete-orphan")
+    stocks = relationship("Stock", back_populates="user", cascade="all, delete-orphan")
+    mutual_funds = relationship("MutualFund", back_populates="user", cascade="all, delete-orphan")
 
 
 class Transaction(Base):
@@ -110,4 +112,55 @@ class RecurringTransaction(Base):
 
     __table_args__ = (
         Index("idx_recurring_user_next_date", "user_id", "next_date"),
+    )
+
+
+class Stock(Base):
+    __tablename__ = "stocks"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    symbol = Column(String, nullable=False)  # Stock ticker symbol (e.g., AAPL, RELIANCE.NS)
+    name = Column(String, nullable=False)  # Company name
+    quantity = Column(Float, nullable=False, default=0)
+    avg_buy_price = Column(Float, nullable=False)  # Average purchase price per unit
+    current_price = Column(Float, nullable=True)  # Latest market price
+    last_updated = Column(DateTime, nullable=True)  # Last price update timestamp
+    exchange = Column(String, nullable=True)  # Stock exchange (NSE, BSE, NASDAQ, etc.)
+    currency = Column(String, nullable=False, default="USD")
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=now_utc, nullable=False)
+    updated_at = Column(DateTime, default=now_utc, onupdate=now_utc, nullable=False)
+
+    user = relationship("User", back_populates="stocks")
+
+    __table_args__ = (
+        Index("idx_stocks_user_symbol", "user_id", "symbol"),
+    )
+
+
+class MutualFund(Base):
+    __tablename__ = "mutual_funds"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    scheme_code = Column(String, nullable=False)  # Mutual fund scheme code
+    scheme_name = Column(String, nullable=False)  # Full scheme name
+    fund_house = Column(String, nullable=True)  # AMC/Fund house name
+    units = Column(Float, nullable=False, default=0)  # Number of units
+    avg_nav = Column(Float, nullable=False)  # Average NAV at purchase
+    current_nav = Column(Float, nullable=True)  # Current NAV
+    last_updated = Column(DateTime, nullable=True)  # Last NAV update timestamp
+    scheme_type = Column(String, nullable=True)  # Equity, Debt, Hybrid, etc.
+    sip_amount = Column(Float, nullable=True)  # Monthly SIP amount if applicable
+    sip_date = Column(Integer, nullable=True)  # SIP date (1-28)
+    currency = Column(String, nullable=False, default="INR")
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=now_utc, nullable=False)
+    updated_at = Column(DateTime, default=now_utc, onupdate=now_utc, nullable=False)
+
+    user = relationship("User", back_populates="mutual_funds")
+
+    __table_args__ = (
+        Index("idx_mutual_funds_user_scheme", "user_id", "scheme_code"),
     )

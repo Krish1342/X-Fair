@@ -56,7 +56,7 @@ const Modal = ({
 
   const modalContent = (
     <div
-      className="fixed inset-0 z-50 overflow-y-auto"
+      className="fixed inset-0 z-[9999] overflow-y-auto"
       aria-labelledby="modal-title"
       role="dialog"
       aria-modal="true"
@@ -67,7 +67,7 @@ const Modal = ({
         onClick={handleOverlayClick}
       >
         <div
-          className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+          className="fixed inset-0 bg-gray-900 bg-opacity-75 transition-opacity"
           aria-hidden="true"
         />
 
@@ -83,8 +83,9 @@ const Modal = ({
         <div
           ref={modalRef}
           className={`
-            inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all 
+            inline-block align-bottom bg-white rounded-lg text-left overflow-visible shadow-xl transform transition-all 
             sm:my-8 sm:align-middle sm:w-full ${sizes[size]} ${className}
+            relative z-[10000]
           `}
         >
           {/* Header */}

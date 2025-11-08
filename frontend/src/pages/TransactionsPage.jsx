@@ -102,10 +102,10 @@ const TransactionsPage = () => {
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={2}
-                d="M12 4v16m8-8H4"
+                d="M13 10V3L4 14h7v7l9-11h-7z"
               />
             </svg>
-            Add UPI
+            Connect UPI
           </Button>
           <Button
             onClick={() => setShowBulkUpload(true)}
